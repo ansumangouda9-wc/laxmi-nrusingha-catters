@@ -1248,3 +1248,153 @@ button {
     font-size: 19px;
   }
 }
+/* Professional selected quantity label */
+.quantity-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: #c49a45;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 0 10px;
+  min-width: 85px;
+  text-align: center;
+}
+
+/* Professional quantity buttons */
+.quantity button {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid #c49a45;
+  background: #171511;
+  color: #d6b36a;
+  font-size: 21px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.quantity button:hover {
+  background: #c49a45;
+  color: #111;
+}
+
+
+/* Professional food menu readability */
+.menu-item {
+  padding: 16px 20px;
+  min-height: 60px;
+  gap: 16px;
+}
+
+.menu-item > span:first-child {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.6;
+  letter-spacing: 0.2px;
+  color: #f5eee0;
+}
+
+/* Menu category headings */
+.category h3 {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 25px;
+  font-weight: 700;
+  line-height: 1.4;
+  margin-bottom: 14px;
+}
+
+/* Add button */
+.menu-item .add {
+  font-size: 14px;
+  font-weight: 700;
+  padding: 10px 18px;
+  min-width: 80px;
+}
+
+/* Quantity controls */
+.quantity button {
+  width: 38px;
+  height: 38px;
+  font-size: 22px;
+}
+
+/* Mobile readability */
+@media (max-width: 600px) {
+  .menu-item {
+    padding: 14px 12px;
+    min-height: 58px;
+  }
+
+  .menu-item > span:first-child {
+    font-size: 16px;
+  }
+
+  .category h3 {
+    font-size: 23px;
+  }
+
+  .menu-item .add {
+    font-size: 13px;
+    padding: 9px 12px;
+  }
+}
+/* Food menu text - large and professional */
+.menu-item > span:first-child {
+  font-size: 20px !important;
+  font-weight: 600;
+  line-height: 1.6;
+  color: #f5eee0;
+}
+
+/* Mobile menu text */
+@media (max-width: 600px) {
+  .menu-item > span:first-child {
+    font-size: 20px !important;
+  }
+}
+
+.selected-menu-group {
+  margin: 20px 0;
+}
+
+.selected-menu-category {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 23px;
+  font-weight: 700;
+  color: #d6b36a;
+  padding: 12px 15px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #c49a45;
+  letter-spacing: 0.4px;
+}
+
+
+.selected-menu-group {
+  margin: 22px 0;
+}
+
+.selected-menu-category {
+  display: block;
+  font-size: 23px;
+  font-weight: 700;
+  color: #d6b36a;
+  padding: 12px 15px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #c49a45;
+}
+.unavailable-premium {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: #fff3df;
+  border: 1px solid #d8b77c;
+  color: #8b6429;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+

@@ -1,194 +1,398 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+import {
+  Routes,
+  Route,
+  Navigate,
+  useNavigate,
+  useLocation,
+} from "react-router-dom";
+
+import {
+  LayoutDashboard,
+  LogOut,
+  RefreshCw,
+  ShoppingCart,
+  Plus,
+  Minus,
+  ArrowRight,
+} from "lucide-react";
+
+import { supabase } from "./lib/supabase";
+
+import AdminLogin from "./pages/admin/AdminLogin";
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import Checkout from "./pages/Checkout";
+
+import ProtectedAdminRoute from "./components/ProtectedAdminRoute";
+
 import "./App.css";
 
-const menu = [
-  {
-    category: "🥗 Plate Counter",
-    items: [
-      "Green Salad", "Pasta Salad", "Khira Sagar Salad",
-      "Italian Salad", "Papad", "Pineapple Jelly",
-      "Ambasadha Jelly", "Tomato Fruits Jelly",
-    ],
-  },
-  {
-    category: "🥤 Welcome",
-    items: ["Mocktail", "Fruit Juice", "Fruit Salad"],
-  },
-  {
-    category: "🍲 Veg Soup",
-    items: [
-      "Lemon Coriander Soup", "Veg Bond Garlic Soup",
-      "Veg Manchow Soup",
-    ],
-  },
-  {
-    category: "🍗 Non-Veg Soup",
-    items: [
-      "Chicken Bond Garlic Soup", "Chicken Hot and Sour Soup",
-      "Chicken Manchow Soup",
-    ],
-  },
-  {
-    category: "🥦 Veg Starters",
-    items: [
-      "Gupchup", "Pastry Counter", "Dahi Papdi Chaat",
-      "Mini Dosa", "Corn Cheese Ball", "Crispy Baby Corn",
-      "Paneer Tikka", "Veg Spring Roll",
-    ],
-  },
-  {
-    category: "🍗 Non-Veg Starters",
-    items: [
-      "Chicken Tangdi Kabab", "Chicken Cutlet",
-      "Chicken Lollipop", "Prawn Gold Coin",
-      "Fish Finger", "Crab Stick", "Mutton Cutlet",
-    ],
-  },
-  {
-    category: "🍛 Veg Main Course",
-    items: [
-      "Paneer Butter Masala", "Paneer Chilli",
-      "Mushroom Masala", "Palak Corn", "Navratan Kurma",
-    ],
-  },
-  {
-    category: "🍖 Non-Veg Main Course",
-    items: [
-      "Chicken Mughlai", "Chicken Butter Masala",
-      "Mutton Rogan Josh", "Fish Kalia",
-      "Prawn Masala", "Crab Curry",
-    ],
-  },
-  {
-    category: "🍚 Rice & Breads",
-    items: [
-      "Plain Rice", "Jeera Rice", "Fried Rice",
-      "Biryani", "Chapati", "Rumali Roti", "Naan", "Kulcha",
-    ],
-  },
-  {
-    category: "🍨 Sweets",
-    items: [
-      "Ice Cream", "Rasmalai", "Gulab Jamun",
-      "Apple Jalebi", "Kheer Sagar", "Gajar Halwa",
-    ],
-  },
-];
+function OwnerMenu() {
+  const navigate = useNavigate();
+  const location = useLocation();
 
-function App() {
-  const [cart, setCart] = useState([]);
-  const [showCheckout, setShowCheckout] = useState(false);
-  const [showInvoice, setShowInvoice] = useState(false);
+  const [menu, setMenu] = useState([]);
+  const [cart, setCart] = useState(location.state?.cart || []);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [expandedGroups, setExpandedGroups] = useState({});
 
-  const [customer, setCustomer] = useState({
-    name: "",
-    phone: "",
-    eventDate: "",
-    guests: "",
-    address: "",
-  });
+  useEffect(() => {
+    if (location.state?.cart) {
+      setCart(location.state.cart);
+    }
+  }, [location.state]);
 
-  const [billNumber] = useState(
-    "LN" + Date.now().toString().slice(-7)
-  );
+  async function loadMenu() {
+    setLoading(true);
+    setError("");
 
-  const totalItems = cart.reduce(
-    (sum, item) => sum + item.quantity,
-    0
-  );
+    try {
+      const [categoryResult, dishResult] = await Promise.all([
+        supabase
+          .from("categories")
+          .select("*")
+          .order("sort_order", { ascending: true }),
 
-  function addItem(name) {
-    setCart((old) => {
-      const found = old.find((item) => item.name === name);
+        supabase
+          .from("menu_items")
+          .select("*")
+          .order("sort_order", { ascending: true }),
+      ]);
 
-      if (found) {
-        return old.map((item) =>
-          item.name === name
-            ? { ...item, quantity: item.quantity + 1 }
+      if (categoryResult.error) throw categoryResult.error;
+      if (dishResult.error) throw dishResult.error;
+
+      const formattedMenu = (categoryResult.data || []).map(
+        (category) => ({
+          id: category.id,
+          name: category.name,
+          is_active: category.is_active,
+          items: (dishResult.data || []).filter(
+            (dish) => dish.category_id === category.id
+          ),
+        })
+      );
+
+      setMenu(formattedMenu);
+    } catch (err) {
+      console.error("Menu loading error:", err);
+      setError(err.message || "Unable to load menu.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadMenu();
+  }, []);
+
+  function toggleGroup(groupId) {
+    setExpandedGroups((previous) => ({
+      ...previous,
+      [groupId]: !previous[groupId],
+    }));
+  }
+
+  function addItem(dish, categoryName = "") {
+    if (dish.is_available === false) return;
+
+    setCart((previous) => {
+      const existing = previous.find(
+        (item) => item.id === dish.id
+      );
+
+      if (existing) {
+        return previous.map((item) =>
+          item.id === dish.id
+            ? {
+                ...item,
+                category_name:
+                  categoryName || item.category_name || "",
+                quantity: Number(item.quantity || 0) + 1,
+              }
             : item
         );
       }
 
-      return [...old, { name, quantity: 1 }];
+      return [
+        ...previous,
+        {
+          id: dish.id,
+          name: dish.name,
+          price: Number(dish.price || 0),
+          quantity: 1,
+          category_name: categoryName,
+        },
+      ];
     });
   }
 
-  function changeQuantity(name, amount) {
-    setCart((old) =>
-      old
+  function changeQuantity(dishId, amount) {
+    setCart((previous) =>
+      previous
         .map((item) =>
-          item.name === name
-            ? { ...item, quantity: item.quantity + amount }
+          item.id === dishId
+            ? {
+                ...item,
+                quantity: Number(item.quantity || 0) + amount,
+              }
             : item
         )
         .filter((item) => item.quantity > 0)
     );
   }
 
-  function updateCustomer(event) {
-    const { name, value } = event.target;
-
-    setCustomer((old) => ({
-      ...old,
-      [name]: value,
-    }));
+  function getCartItem(dishId) {
+    return cart.find((item) => item.id === dishId);
   }
 
-  const previewInvoice = () => {
-  if (
-    !customer.name.trim() ||
-    !customer.phone.trim() ||
-    !customer.eventDate ||
-    !customer.guests ||
-    Number(customer.guests) <= 0
-  ) {
-    alert("Please fill all required customer details.");
-    return;
-  }
+  const totalItems = cart.reduce(
+    (sum, item) => sum + Number(item.quantity || 0),
+    0
+  );
 
-  if (totalItems === 0) {
-    alert("Please add at least one menu item.");
-    return;
-  }
+  const totalAmount = cart.reduce(
+    (sum, item) =>
+      sum + Number(item.price || 0) * Number(item.quantity || 0),
+    0
+  );
 
-  setShowInvoice(true);
-};
+  async function handleLogout() {
+    const confirmed = window.confirm(
+      "Are you sure you want to log out?"
+    );
 
-  function sendWhatsAppOrder(event) {
-    event.preventDefault();
+    if (!confirmed) return;
 
-    const businessWhatsApp = "917606913324";
+    const { error: logoutError } =
+      await supabase.auth.signOut();
 
-    if (businessWhatsApp.includes("X")) {
-      alert("Please add the catering business WhatsApp number in App.jsx first.");
+    if (logoutError) {
+      alert(logoutError.message);
       return;
     }
 
-    const orderItems = cart
-      .map((item) => `${item.name} x ${item.quantity}`)
-      .join("\n");
+    navigate("/admin", { replace: true });
+  }
 
-    const message = `
-NEW CATERING ORDER
+  function renderDish(dish, nested = false, categoryName = "") {
+    const selectedItem = getCartItem(dish.id);
+    const unavailable = dish.is_available === false;
 
-Name: ${customer.name}
-Phone: ${customer.phone}
-Event Date: ${customer.eventDate}
-Number of Guests: ${customer.guests}
-Address: ${customer.address}
+    return (
+      <div
+        className="menu-item"
+        key={dish.id}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "15px",
+          padding: "14px 10px",
+          flexWrap: "wrap",
+          ...(nested ? { paddingLeft: "24px" } : {}),
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+            flex: 1,
+            minWidth: "180px",
+          }}
+        >
+          {dish.image_url && (
+            <img
+              src={dish.image_url}
+              alt={dish.name}
+              loading="lazy"
+              style={{
+                width: "58px",
+                height: "58px",
+                objectFit: "cover",
+                borderRadius: "8px",
+                flexShrink: 0,
+              }}
+            />
+          )}
 
-SELECTED MENU:
-${orderItems}
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "8px",
+              }}
+            >
+              <strong>{dish.name}</strong>
 
-Total Items: ${totalItems}
+              {unavailable && (
+                <span className="unavailable-premium">
+                  Currently Unavailable
+                </span>
+              )}
+            </div>
 
-Final Price: To be confirmed by Laxmi Nrusingha Catters.
-    `;
+            <div
+              style={{
+                fontSize: "13px",
+                opacity: 0.75,
+                marginTop: "5px",
+              }}
+            >
+              ₹{Number(dish.price || 0).toFixed(2)}
+            </div>
+          </div>
+        </div>
 
-    const url = `https://wa.me/${businessWhatsApp}?text=${encodeURIComponent(message)}`;
+        <div style={{ flexShrink: 0 }}>
+          {unavailable ? (
+            <span
+              style={{
+                color: "#9b7650",
+                fontSize: "12px",
+                fontWeight: "700",
+              }}
+            >
+              Not selectable
+            </span>
+          ) : selectedItem ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                border: "1px solid #b99a55",
+                borderRadius: "8px",
+                padding: "5px 9px",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => changeQuantity(dish.id, -1)}
+                style={quantityButtonStyle}
+                aria-label={`Decrease ${dish.name}`}
+              >
+                <Minus size={15} />
+              </button>
 
-    window.open(url, "_blank");
+              <strong>{selectedItem.quantity}</strong>
+
+              <button
+                type="button"
+                onClick={() => addItem(dish, categoryName)}
+                style={quantityButtonStyle}
+                aria-label={`Increase ${dish.name}`}
+              >
+                <Plus size={15} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => addItem(dish, categoryName)}
+              style={{
+                padding: "9px 16px",
+                background: "#b99a55",
+                color: "#15130f",
+                border: "none",
+                borderRadius: "7px",
+                fontWeight: "700",
+                cursor: "pointer",
+              }}
+            >
+              + Add
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderCategoryItems(category) {
+    const entries = [];
+    const groups = new Map();
+
+    category.items.forEach((dish) => {
+      const groupName = dish.group_name?.trim();
+
+      if (!groupName) {
+        entries.push({
+          type: "dish",
+          id: dish.id,
+          dish,
+        });
+        return;
+      }
+
+      const normalizedName = groupName.toLowerCase();
+
+      if (!groups.has(normalizedName)) {
+        const group = {
+          type: "group",
+          id: `${category.id}-${normalizedName}`,
+          name: groupName,
+          items: [],
+        };
+
+        groups.set(normalizedName, group);
+        entries.push(group);
+      }
+
+      groups.get(normalizedName).items.push(dish);
+    });
+
+    return entries.map((entry) => {
+      if (entry.type === "dish") {
+        return renderDish(entry.dish, false, category.name);
+      }
+
+      const expanded = Boolean(expandedGroups[entry.id]);
+
+      return (
+        <div
+          key={entry.id}
+          style={{
+            borderBottom: "1px solid rgba(185,154,85,0.2)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => toggleGroup(entry.id)}
+            aria-expanded={expanded}
+            style={{
+              width: "100%",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "16px 10px",
+              background: "transparent",
+              color: "inherit",
+              border: "none",
+              cursor: "pointer",
+              textAlign: "left",
+              fontSize: "16px",
+              fontWeight: "bold",
+            }}
+          >
+            <span>
+              {entry.name} ({entry.items.length} recipes)
+            </span>
+            <span>{expanded ? "−" : "+"}</span>
+          </button>
+
+          {expanded &&
+            entry.items.map((dish) =>
+              renderDish(dish, true, category.name)
+            )}
+        </div>
+      );
+    });
   }
 
   return (
@@ -200,297 +404,200 @@ Final Price: To be confirmed by Laxmi Nrusingha Catters.
 
       <main className="container">
         <div className="heading">
-          <span>WELCOME TO OUR CATERING</span>
-          <h2>{showCheckout ? "Checkout" : "Food Menu"}</h2>
-          <p>
-            {showCheckout
-              ? "Please provide your event details"
-              : "Choose your favourite dishes"}
-          </p>
+          <span>OWNER PANEL</span>
+          <h2>Food Menu</h2>
+          <p>Select dishes to prepare your customer bill</p>
         </div>
 
-        {!showCheckout ? (
-          <>
-            {menu.map((section) => (
-              <section className="category" key={section.category}>
-                <h3>{section.category}</h3>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            alignItems: "center",
+            gap: "12px",
+            flexWrap: "wrap",
+            marginBottom: "30px",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => navigate("/admin/dashboard")}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "9px",
+              padding: "13px 20px",
+              background: "#b99a55",
+              color: "#15130f",
+              border: "none",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              cursor: "pointer",
+              fontSize: "15px",
+            }}
+          >
+            <LayoutDashboard size={18} />
+            Go to Admin Dashboard
+          </button>
 
-                {section.items.map((name) => {
-                  const selected = cart.find(
-                    (item) => item.name === name
-                  );
+          <button
+            type="button"
+            onClick={handleLogout}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "13px 18px",
+              background: "transparent",
+              color: "#b99a55",
+              border: "1px solid #b99a55",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontSize: "15px",
+            }}
+          >
+            <LogOut size={17} />
+            Logout
+          </button>
+        </div>
 
-                  return (
-                    <div className="menu-item" key={name}>
-                      <span>{name}</span>
-
-                      {selected ? (
-                        <div className="quantity">
-                          <button
-                            type="button"
-                            onClick={() => changeQuantity(name, -1)}
-                          >
-                            −
-                          </button>
-
-                          <strong>{selected.quantity}</strong>
-
-                          <button
-                            type="button"
-                            onClick={() => changeQuantity(name, 1)}
-                          >
-                            +
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="add"
-                          onClick={() => addItem(name)}
-                        >
-                          + Add
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </section>
-            ))}
-          </>
-        ) : (
-          <section className="category checkout-section">
-            <h3>Customer Details</h3>
-
-            <form onSubmit={sendWhatsAppOrder}>
-              <label>Your Name *</label>
-              <input
-                type="text"
-                name="name"
-                value={customer.name}
-                onChange={updateCustomer}
-                placeholder="Enter your full name"
-                required
-              />
-
-              <label>Mobile Number *</label>
-              <input
-                name="phone"
-                type="tel"
-                value={customer.phone}
-                onChange={updateCustomer}
-                placeholder="Enter your mobile number"
-                pattern="[0-9]{10}"
-                maxLength="10"
-                required
-              />
-
-              <label>Event Date *</label>
-              <input
-                name="eventDate"
-                type="date"
-                min={new Date().toISOString().split("T")[0]}
-                value={customer.eventDate}
-                onChange={updateCustomer}
-                required
-              />
-
-              <label>Number of Guests *</label>
-              <input
-                name="guests"
-                type="number"
-                min="1"
-                value={customer.guests}
-                onChange={updateCustomer}
-                placeholder="Enter number of guests"
-                required
-              />
-
-              <label>Event Address</label>
-              <textarea
-                name="address"
-                value={customer.address}
-                onChange={updateCustomer}
-                placeholder="Enter event location"
-                rows="3"
-              />
-
-              <h3 className="order-heading">Your Selected Menu</h3>
-
-              {cart.map((item) => (
-                <div className="menu-item" key={item.name}>
-                  <span>{item.name}</span>
-                  <strong>× {item.quantity}</strong>
-                </div>
-              ))}
-
-              <div className="checkout-summary">
-                <p>Total Selected Items: <strong>{totalItems}</strong></p>
-                <p>Final Amount: <strong>To Be Confirmed</strong></p>
-              </div>
-
-              <button
-                type="button"
-                className="invoice-preview-btn"
-                onClick={previewInvoice}
-              >
-                Preview Invoice
-              </button>
-
-              <button
-                className="whatsapp-btn"
-                type="submit"
-                disabled={cart.length === 0}
-              >
-                Send Order on WhatsApp
-              </button>
-
-              <button
-                type="button"
-                className="back-btn"
-                onClick={() => {
-                  setShowCheckout(false);
-                  setShowInvoice(false);
-                }}
-              >
-                ← Back to Menu
-              </button>
-            </form>
-
-            {/* INVOICE POPUP */}
-            {showInvoice && (
-              <div
-                className="invoice-overlay"
-                onClick={(event) => {
-                  if (event.target === event.currentTarget) {
-                    setShowInvoice(false);
-                  }
-                }}
-              >
-                <div className="invoice-modal">
-
-                  <div className="invoice-modal-header">
-                    <h2>Invoice Preview</h2>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowInvoice(false)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-
-                  <div className="print-bill">
-
-                    <div className="invoice-brand">
-                      <div className="invoice-logo">LN</div>
-                      <h1>LAXMI NRUSINGHA CATTERS</h1>
-                      <p>WEDDING • EVENTS • CATERING</p>
-                      <p className="invoice-tagline">
-                        Making Every Celebration Special
-                      </p>
-                    </div>
-
-                    <div className="invoice-title">
-                      <h2>ORDER INVOICE</h2>
-                      <p><strong>Bill No:</strong> {billNumber}</p>
-                      <p>
-                        <strong>Invoice Date:</strong>{" "}
-                        {new Date().toLocaleDateString("en-IN")}
-                      </p>
-                    </div>
-
-                    <div className="invoice-customer">
-                      <h3>Customer Information</h3>
-                      <p><strong>Name:</strong> {customer.name}</p>
-                      <p><strong>Phone:</strong> {customer.phone}</p>
-                      <p><strong>Event Date:</strong> {customer.eventDate}</p>
-                      <p><strong>Guests:</strong> {customer.guests}</p>
-                      <p>
-                        <strong>Address:</strong>{" "}
-                        {customer.address || "Not provided"}
-                      </p>
-                    </div>
-
-                    <h3 className="invoice-menu-title">Order Details</h3>
-
-                    <table className="bill-table">
-                      <thead>
-                        <tr>
-                          <th>Sl. No.</th>
-                          <th>Food Item</th>
-                          <th>Quantity</th>
-                        </tr>
-                      </thead>
-
-                      <tbody>
-                        {cart.map((item, index) => (
-                          <tr key={item.name}>
-                            <td>{index + 1}</td>
-                            <td>{item.name}</td>
-                            <td>{item.quantity}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-
-                    <div className="invoice-total">
-                      <p>
-                        Total Food Items: <strong>{cart.length}</strong>
-                      </p>
-                      <p>
-                        Total Quantity: <strong>{totalItems}</strong>
-                      </p>
-                      <h2>Grand Total: Price To Be Confirmed</h2>
-                    </div>
-
-                    <div className="invoice-footer">
-                      <p>Thank you for choosing Laxmi Nrusingha Catters!</p>
-                      <p>We look forward to serving you.</p>
-                    </div>
-
-                  </div>
-
-                  <div className="invoice-modal-actions">
-                    <button
-                      type="button"
-                      className="invoice-close-btn"
-                      onClick={() => setShowInvoice(false)}
-                    >
-                      Close
-                    </button>
-
-                    <button
-                      type="button"
-                      className="invoice-print-btn"
-                      onClick={() => window.print()}
-                    >
-                      🖨 Print Invoice
-                    </button>
-                  </div>
-
-                </div>
-              </div>
-            )}
-          </section>
+        {loading && (
+          <div style={{ textAlign: "center", padding: "30px" }}>
+            <RefreshCw size={22} />
+            <p>Loading menu...</p>
+          </div>
         )}
+
+        {error && (
+          <div role="alert" className="admin-error">
+            {error}
+            <button
+              type="button"
+              onClick={loadMenu}
+              style={{ marginLeft: "12px" }}
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+        {!loading && !error && menu.length === 0 && (
+          <p>No categories found. Add categories from Admin Dashboard.</p>
+        )}
+
+        {!loading &&
+          !error &&
+          menu.map((category) => (
+            <section className="category" key={category.id}>
+              <h3>
+                {category.name}
+
+                {!category.is_active && (
+                  <small
+                    style={{
+                      marginLeft: "10px",
+                      color: "#c87965",
+                      fontSize: "12px",
+                    }}
+                  >
+                    Hidden
+                  </small>
+                )}
+              </h3>
+
+              {category.items.length > 0 ? (
+                renderCategoryItems(category)
+              ) : (
+                <p>No dishes in this category yet.</p>
+              )}
+            </section>
+          ))}
       </main>
 
-      {!showCheckout && cart.length > 0 && (
-        <div className="cart-bar">
+      {totalItems > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "0",
+            left: "0",
+            right: "0",
+            zIndex: 1000,
+            background: "#201b13",
+            color: "#fff",
+            padding: "14px 20px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "12px",
+            boxShadow: "0 -4px 18px rgba(0,0,0,0.2)",
+          }}
+        >
           <div>
-            <strong>{totalItems} Items Selected</strong>
-            <p>Price on request</p>
+            <strong>{totalItems} items selected</strong>
+            <div style={{ color: "#d8bd83", fontSize: "14px" }}>
+              Total: ₹{totalAmount.toFixed(2)}
+            </div>
           </div>
 
           <button
-            className="checkout-btn"
-            onClick={() => setShowCheckout(true)}
+            type="button"
+            onClick={() =>
+              navigate("/checkout", {
+                state: { cart },
+              })
+            }
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "9px",
+              padding: "13px 20px",
+              background: "#b99a55",
+              color: "#15130f",
+              border: "none",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
           >
-            Continue →
+            <ShoppingCart size={18} />
+            Proceed to Checkout
+            <ArrowRight size={17} />
           </button>
         </div>
       )}
     </div>
+  );
+}
+
+const quantityButtonStyle = {
+  width: "28px",
+  height: "28px",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "transparent",
+  border: "none",
+  color: "#8b6b32",
+  cursor: "pointer",
+};
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/admin" element={<AdminLogin />} />
+
+      <Route element={<ProtectedAdminRoute />}>
+        <Route path="/" element={<OwnerMenu />} />
+        <Route path="/checkout" element={<Checkout />} />
+        <Route path="/admin/dashboard" element={<AdminDashboard />} />
+      </Route>
+
+      <Route
+        path="*"
+        element={<Navigate to="/admin" replace />}
+      />
+    </Routes>
   );
 }
 
