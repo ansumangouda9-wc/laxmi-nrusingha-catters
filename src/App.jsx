@@ -1,6 +1,4 @@
-
 import { useEffect, useState } from "react";
-
 import {
   Routes,
   Route,
@@ -8,7 +6,6 @@ import {
   useNavigate,
   useLocation,
 } from "react-router-dom";
-
 import {
   LayoutDashboard,
   LogOut,
@@ -17,16 +14,15 @@ import {
   Plus,
   Minus,
   ArrowRight,
+  MessageCircle,
 } from "lucide-react";
+import { jsPDF } from "jspdf";
 
 import { supabase } from "./lib/supabase";
-
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import Checkout from "./pages/Checkout";
-
 import ProtectedAdminRoute from "./components/ProtectedAdminRoute";
-
 import "./App.css";
 
 function OwnerMenu() {
@@ -36,6 +32,7 @@ function OwnerMenu() {
   const [menu, setMenu] = useState([]);
   const [cart, setCart] = useState(location.state?.cart || []);
   const [loading, setLoading] = useState(true);
+  const [sharingMenu, setSharingMenu] = useState(false);
   const [error, setError] = useState("");
   const [expandedGroups, setExpandedGroups] = useState({});
 
@@ -55,7 +52,6 @@ function OwnerMenu() {
           .from("categories")
           .select("*")
           .order("sort_order", { ascending: true }),
-
         supabase
           .from("menu_items")
           .select("*")
@@ -65,16 +61,14 @@ function OwnerMenu() {
       if (categoryResult.error) throw categoryResult.error;
       if (dishResult.error) throw dishResult.error;
 
-      const formattedMenu = (categoryResult.data || []).map(
-        (category) => ({
-          id: category.id,
-          name: category.name,
-          is_active: category.is_active,
-          items: (dishResult.data || []).filter(
-            (dish) => dish.category_id === category.id
-          ),
-        })
-      );
+      const formattedMenu = (categoryResult.data || []).map((category) => ({
+        id: category.id,
+        name: category.name,
+        is_active: category.is_active,
+        items: (dishResult.data || []).filter(
+          (dish) => dish.category_id === category.id
+        ),
+      }));
 
       setMenu(formattedMenu);
     } catch (err) {
@@ -101,16 +95,15 @@ function OwnerMenu() {
 
     setCart((previous) => {
       const existing = previous.find(
-        (item) => item.id === dish.id
+        (item) => String(item.id) === String(dish.id)
       );
 
       if (existing) {
         return previous.map((item) =>
-          item.id === dish.id
+          String(item.id) === String(dish.id)
             ? {
                 ...item,
-                category_name:
-                  categoryName || item.category_name || "",
+                category_name: categoryName || item.category_name || "",
                 quantity: Number(item.quantity || 0) + 1,
               }
             : item
@@ -134,19 +127,21 @@ function OwnerMenu() {
     setCart((previous) =>
       previous
         .map((item) =>
-          item.id === dishId
+          String(item.id) === String(dishId)
             ? {
                 ...item,
                 quantity: Number(item.quantity || 0) + amount,
               }
             : item
         )
-        .filter((item) => item.quantity > 0)
+        .filter((item) => Number(item.quantity || 0) > 0)
     );
   }
 
   function getCartItem(dishId) {
-    return cart.find((item) => item.id === dishId);
+    return cart.find(
+      (item) => String(item.id) === String(dishId)
+    );
   }
 
   const totalItems = cart.reduce(
@@ -160,6 +155,356 @@ function OwnerMenu() {
     0
   );
 
+  // ------------------------------------------------
+  // PREMIUM MENU PDF
+  // ------------------------------------------------
+
+  function createMenuPDF() {
+    if (!menu.length) {
+      throw new Error("The menu is empty.");
+    }
+
+    const pdf = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+    });
+
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 16;
+    const contentWidth = pageWidth - margin * 2;
+
+    const gold = [151, 112, 48];
+    const darkGold = [104, 75, 35];
+    const paleGold = [246, 239, 224];
+    const cream = [255, 253, 247];
+    const ink = [58, 48, 35];
+    const muted = [139, 119, 87];
+    const unavailableColor = [157, 87, 69];
+
+    let y = 16;
+    let pageNumber = 1;
+
+    function drawPageBackground() {
+      pdf.setFillColor(...cream);
+      pdf.rect(0, 0, pageWidth, pageHeight, "F");
+
+      pdf.setDrawColor(...gold);
+      pdf.setLineWidth(0.65);
+      pdf.rect(7, 7, pageWidth - 14, pageHeight - 14);
+
+      pdf.setDrawColor(220, 202, 165);
+      pdf.setLineWidth(0.25);
+      pdf.rect(9.5, 9.5, pageWidth - 19, pageHeight - 19);
+    }
+
+    function drawHeader() {
+      drawPageBackground();
+
+      pdf.setTextColor(...gold);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(9);
+      pdf.text("✦", pageWidth / 2 - 37, y + 3, { align: "center" });
+      pdf.text("✦", pageWidth / 2 + 37, y + 3, { align: "center" });
+
+      y += 10;
+
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(23);
+      pdf.setTextColor(...darkGold);
+      pdf.text("LAXMI NRUSINGHA", pageWidth / 2, y, {
+        align: "center",
+      });
+
+      y += 9;
+      pdf.setFontSize(17);
+      pdf.setTextColor(...gold);
+      pdf.text("CATTERS", pageWidth / 2, y, {
+        align: "center",
+      });
+
+      y += 7;
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8);
+      pdf.setTextColor(...muted);
+      pdf.text("W E D D I N G   •   E V E N T S   •   C A T E R I N G", pageWidth / 2, y, {
+        align: "center",
+      });
+
+      y += 7;
+      pdf.setDrawColor(...gold);
+      pdf.setLineWidth(0.5);
+      pdf.line(margin + 17, y, pageWidth - margin - 17, y);
+
+      y += 9;
+
+      pdf.setFillColor(...paleGold);
+      pdf.roundedRect(
+        pageWidth / 2 - 26,
+        y - 5,
+        52,
+        10,
+        2,
+        2,
+        "F"
+      );
+
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(10);
+      pdf.setTextColor(...darkGold);
+      pdf.text("OUR MENU", pageWidth / 2, y + 1.5, {
+        align: "center",
+      });
+
+      y += 12;
+
+      if (pageNumber === 1) {
+        pdf.setFont("helvetica", "italic");
+        pdf.setFontSize(8.5);
+        pdf.setTextColor(...muted);
+        pdf.text(
+          "A delightful selection for your special occasions",
+          pageWidth / 2,
+          y,
+          { align: "center" }
+        );
+        y += 10;
+      } else {
+        y += 3;
+      }
+    }
+
+    function addNewPage() {
+      pdf.addPage();
+      pageNumber += 1;
+      y = 16;
+      drawHeader();
+    }
+
+    function ensureSpace(requiredHeight) {
+      if (y + requiredHeight > pageHeight - 20) {
+        addNewPage();
+      }
+    }
+
+    drawHeader();
+
+    menu.forEach((category) => {
+      const dishes = category.items || [];
+      if (!dishes.length) return;
+
+      ensureSpace(18);
+
+      // Category title panel
+      pdf.setFillColor(...paleGold);
+      pdf.roundedRect(
+        margin,
+        y,
+        contentWidth,
+        10,
+        1.5,
+        1.5,
+        "F"
+      );
+
+      pdf.setDrawColor(222, 205, 171);
+      pdf.setLineWidth(0.25);
+      pdf.roundedRect(
+        margin,
+        y,
+        contentWidth,
+        10,
+        1.5,
+        1.5,
+        "S"
+      );
+
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(10);
+      pdf.setTextColor(...darkGold);
+      pdf.text(String(category.name || "Menu Category").toUpperCase(), margin + 4, y + 6.6);
+
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(7);
+      pdf.setTextColor(...muted);
+      pdf.text(`${dishes.length} ITEMS`, pageWidth - margin - 4, y + 6.5, {
+        align: "right",
+      });
+
+      y += 14;
+
+      dishes.forEach((dish, index) => {
+        const name = String(dish.name || "Dish");
+        const isUnavailable = dish.is_available === false;
+        const nameLines = pdf.splitTextToSize(name, contentWidth - 30);
+        const rowHeight = Math.max(7, nameLines.length * 4.4 + 2);
+
+        ensureSpace(rowHeight + 1);
+
+        // Alternating soft background
+        if (index % 2 === 1) {
+          pdf.setFillColor(252, 249, 241);
+          pdf.roundedRect(
+            margin + 1,
+            y - 1,
+            contentWidth - 2,
+            rowHeight,
+            1,
+            1,
+            "F"
+          );
+        }
+
+        // Small decorative bullet
+        pdf.setFillColor(...gold);
+        pdf.circle(margin + 5, y + 3, 0.75, "F");
+
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(9);
+        pdf.setTextColor(...ink);
+        pdf.text(nameLines, margin + 10, y + 4);
+
+        if (isUnavailable) {
+          pdf.setFont("helvetica", "italic");
+          pdf.setFontSize(6.5);
+          pdf.setTextColor(...unavailableColor);
+          pdf.text(
+            "Unavailable",
+            pageWidth - margin - 3,
+            y + 4,
+            { align: "right" }
+          );
+        }
+
+        pdf.setDrawColor(235, 226, 209);
+        pdf.setLineWidth(0.2);
+        pdf.line(
+          margin + 9,
+          y + rowHeight,
+          pageWidth - margin - 3,
+          y + rowHeight
+        );
+
+        y += rowHeight + 1.5;
+      });
+
+      y += 5;
+    });
+
+    ensureSpace(23);
+
+    y += 2;
+    pdf.setDrawColor(...gold);
+    pdf.setLineWidth(0.45);
+    pdf.line(margin + 12, y, pageWidth - margin - 12, y);
+
+    y += 8;
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(9);
+    pdf.setTextColor(...darkGold);
+    pdf.text(
+      "Thank you for considering Laxmi Nrusingha Catters",
+      pageWidth / 2,
+      y,
+      { align: "center" }
+    );
+
+    y += 5;
+    pdf.setFont("helvetica", "italic");
+    pdf.setFontSize(8);
+    pdf.setTextColor(...muted);
+    pdf.text(
+      "We look forward to being part of your special celebration.",
+      pageWidth / 2,
+      y,
+      { align: "center" }
+    );
+
+    // Page numbers on every page
+    const totalPages = pdf.internal.getNumberOfPages();
+
+    for (let page = 1; page <= totalPages; page += 1) {
+      pdf.setPage(page);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(7);
+      pdf.setTextColor(...muted);
+      pdf.text(
+        `LAXMI NRUSINGHA CATTERS  •  ${page} / ${totalPages}`,
+        pageWidth / 2,
+        pageHeight - 12,
+        { align: "center" }
+      );
+    }
+
+    return pdf;
+  }
+
+  async function shareMenuOnWhatsApp() {
+    if (loading || !menu.length) {
+      alert("The menu is not loaded yet. Please try again.");
+      return;
+    }
+
+    if (sharingMenu) return;
+
+    setSharingMenu(true);
+
+    try {
+      const pdf = createMenuPDF();
+      const blob = pdf.output("blob");
+
+      if (!blob || blob.size === 0) {
+        throw new Error("The menu PDF could not be created.");
+      }
+
+      const file = new File(
+        [blob],
+        "Laxmi-Nrusingha-Premium-Catering-Menu.pdf",
+        { type: "application/pdf" }
+      );
+
+      const caption =
+        "🍽️ LAXMI NRUSINGHA CATTERS\n" +
+        "WEDDING • EVENTS • CATERING\n\n" +
+        "Please find our catering menu attached. We would be delighted to be part of your special occasion.";
+
+      if (
+        navigator.share &&
+        navigator.canShare &&
+        navigator.canShare({ files: [file] })
+      ) {
+        await navigator.share({
+          title: "Laxmi Nrusingha Premium Catering Menu",
+          text: caption,
+          files: [file],
+        });
+        return;
+      }
+
+      // On desktop, download the PDF first.
+      pdf.save("Laxmi-Nrusingha-Premium-Catering-Menu.pdf");
+
+      const whatsappUrl =
+        "https://wa.me/?text=" +
+        encodeURIComponent(
+          caption +
+            "\n\nThe menu PDF has been downloaded. Please attach the downloaded PDF before sending."
+        );
+
+      window.open(whatsappUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+
+      console.error("Menu sharing error:", err);
+      alert(
+        "Unable to prepare the menu PDF. Please try again."
+      );
+    } finally {
+      setSharingMenu(false);
+    }
+  }
+
   async function handleLogout() {
     const confirmed = window.confirm(
       "Are you sure you want to log out?"
@@ -167,8 +512,7 @@ function OwnerMenu() {
 
     if (!confirmed) return;
 
-    const { error: logoutError } =
-      await supabase.auth.signOut();
+    const { error: logoutError } = await supabase.auth.signOut();
 
     if (logoutError) {
       alert(logoutError.message);
@@ -322,11 +666,7 @@ function OwnerMenu() {
       const groupName = dish.group_name?.trim();
 
       if (!groupName) {
-        entries.push({
-          type: "dish",
-          id: dish.id,
-          dish,
-        });
+        entries.push({ type: "dish", id: dish.id, dish });
         return;
       }
 
@@ -357,9 +697,7 @@ function OwnerMenu() {
       return (
         <div
           key={entry.id}
-          style={{
-            borderBottom: "1px solid rgba(185,154,85,0.2)",
-          }}
+          style={{ borderBottom: "1px solid rgba(185,154,85,0.2)" }}
         >
           <button
             type="button"
@@ -397,6 +735,64 @@ function OwnerMenu() {
 
   return (
     <div className="app">
+      <style>{`
+        .premium-menu-actions {
+          display:flex;
+          justify-content:flex-end;
+          align-items:center;
+          gap:12px;
+          flex-wrap:wrap;
+          margin-bottom:30px;
+        }
+        .premium-action {
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          gap:9px;
+          padding:13px 19px;
+          border-radius:9px;
+          font-weight:800;
+          cursor:pointer;
+          transition:transform .2s ease, box-shadow .2s ease;
+        }
+        .premium-action:hover {
+          transform:translateY(-2px);
+          box-shadow:0 7px 18px rgba(0,0,0,.12);
+        }
+        .premium-action:disabled {
+          opacity:.65;
+          cursor:wait;
+          transform:none;
+        }
+        .premium-share {
+          color:#fff;
+          border:1px solid #147b43;
+          background:linear-gradient(135deg,#1fa65a,#116b3c);
+        }
+        .premium-dashboard {
+          color:#2c2111;
+          border:1px solid #b99a55;
+          background:linear-gradient(135deg,#ead7a9,#b99a55);
+        }
+        .premium-logout {
+          color:#b99a55;
+          border:1px solid #b99a55;
+          background:transparent;
+        }
+        .premium-menu-note {
+          color:#94794a;
+          font-size:12px;
+          text-align:right;
+          margin-top:-20px;
+          margin-bottom:24px;
+        }
+        @media(max-width:600px) {
+          .premium-menu-actions { justify-content:stretch; }
+          .premium-action { flex:1 1 100%; }
+          .premium-menu-note { text-align:center; margin-top:-15px; }
+        }
+      `}</style>
+
       <header className="header">
         <h1>LAXMI NRUSINGHA CATTERS</h1>
         <p>WEDDING • EVENTS • CATERING</p>
@@ -409,57 +805,39 @@ function OwnerMenu() {
           <p>Select dishes to prepare your customer bill</p>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            alignItems: "center",
-            gap: "12px",
-            flexWrap: "wrap",
-            marginBottom: "30px",
-          }}
-        >
+        <div className="premium-menu-actions">
           <button
             type="button"
-            onClick={() => navigate("/admin/dashboard")}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "9px",
-              padding: "13px 20px",
-              background: "#b99a55",
-              color: "#15130f",
-              border: "none",
-              borderRadius: "8px",
-              fontWeight: "bold",
-              cursor: "pointer",
-              fontSize: "15px",
-            }}
+            className="premium-action premium-share"
+            onClick={shareMenuOnWhatsApp}
+            disabled={loading || sharingMenu}
           >
-            <LayoutDashboard size={18} />
-            Go to Admin Dashboard
+            <MessageCircle size={18} />
+            {sharingMenu ? "Preparing Menu PDF..." : "Share Premium Menu"}
           </button>
 
           <button
             type="button"
+            className="premium-action premium-dashboard"
+            onClick={() => navigate("/admin/dashboard")}
+          >
+            <LayoutDashboard size={18} />
+            Admin Dashboard
+          </button>
+
+          <button
+            type="button"
+            className="premium-action premium-logout"
             onClick={handleLogout}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "13px 18px",
-              background: "transparent",
-              color: "#b99a55",
-              border: "1px solid #b99a55",
-              borderRadius: "8px",
-              cursor: "pointer",
-              fontSize: "15px",
-            }}
           >
             <LogOut size={17} />
             Logout
           </button>
         </div>
+
+        <p className="premium-menu-note">
+          Share a beautifully formatted PDF of your complete catering menu.
+        </p>
 
         {loading && (
           <div style={{ textAlign: "center", padding: "30px" }}>
@@ -491,7 +869,6 @@ function OwnerMenu() {
             <section className="category" key={category.id}>
               <h3>
                 {category.name}
-
                 {!category.is_active && (
                   <small
                     style={{
@@ -544,7 +921,7 @@ function OwnerMenu() {
             type="button"
             onClick={() =>
               navigate("/checkout", {
-                state: { cart },
+                state: { cart, menu },
               })
             }
             style={{
@@ -593,10 +970,7 @@ function App() {
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
       </Route>
 
-      <Route
-        path="*"
-        element={<Navigate to="/admin" replace />}
-      />
+      <Route path="*" element={<Navigate to="/admin" replace />} />
     </Routes>
   );
 }
