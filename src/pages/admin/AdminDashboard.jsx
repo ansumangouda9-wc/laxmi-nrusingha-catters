@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
+import OrderHistory from "./OrderHistory";
 import {
   Plus,
   ArrowLeft,
@@ -706,7 +707,7 @@ function AdminDashboard() {
           )}
         </div>
       </section>
-
+      <OrderHistory />
       <footer className="admin-footer">
         Laxmi Nrusingha Catters · Menu Administration
       </footer>

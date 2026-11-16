@@ -1,7 +1,7 @@
-
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
+import { supabase } from "../lib/supabase";
 
 import {
   ArrowLeft,
@@ -25,9 +25,11 @@ import {
 } from "lucide-react";
 
 function Checkout() {
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [savedOrderId, setSavedOrderId] = useState("");
+  const [savedBillNumber, setSavedBillNumber] = useState("");
   const navigate = useNavigate();
   const location = useLocation();
-  const invoiceRef = useRef(null);
 
   const [items, setItems] = useState(location.state?.cart || []);
   const [menu] = useState(location.state?.menu || []);
@@ -53,25 +55,43 @@ function Checkout() {
     year: "numeric",
   });
 
-  // Use the complete menu supplied by App.jsx.
-  // Fallback to selected dishes if Checkout is opened directly.
+  // Convert HTML time input (24-hour) to 12-hour time with AM/PM.
+  function formatEventTime(time) {
+    if (!time) return "Not specified";
+
+    const [hours, minutes] = time.split(":");
+    const hour = Number(hours);
+
+    if (
+      !Number.isFinite(hour) ||
+      !Number.isFinite(Number(minutes))
+    ) {
+      return time;
+    }
+
+    const period = hour >= 12 ? "PM" : "AM";
+    const formattedHour = hour % 12 || 12;
+
+    return `${String(formattedHour).padStart(2, "0")}:${minutes} ${period}`;
+  }
+
+  // If the full menu was not passed, use selected dishes as a fallback.
   const completeMenu = menu.length
     ? menu
     : [
-        {
-          id: "selected-menu",
-          name: "Selected Dishes",
-          items: items.map((item) => ({
-            ...item,
-            category_name: item.category_name || "Uncategorized",
-          })),
-        },
-      ];
+      {
+        id: "selected-menu",
+        name: "Selected Dishes",
+        items: items.map((item) => ({
+          ...item,
+          category_name: item.category_name || "Uncategorized",
+        })),
+      },
+    ];
 
-  const selectedItems = items.reduce((map, item) => {
-    map.set(String(item.id), item);
-    return map;
-  }, new Map());
+  const selectedItems = new Map(
+    items.map((item) => [String(item.id), item])
+  );
 
   const allMenuRows = completeMenu.flatMap((category) =>
     (category.items || []).map((dish) => ({
@@ -95,11 +115,11 @@ function Checkout() {
     setItems((previous) =>
       previous
         .map((item) =>
-          item.id === id
+          String(item.id) === String(id)
             ? {
-                ...item,
-                quantity: Number(item.quantity || 0) + amount,
-              }
+              ...item,
+              quantity: Number(item.quantity || 0) + amount,
+            }
             : item
         )
         .filter((item) => Number(item.quantity || 0) > 0)
@@ -111,7 +131,7 @@ function Checkout() {
 
   function removeItem(id) {
     setItems((previous) =>
-      previous.filter((item) => item.id !== id)
+      previous.filter((item) => String(item.id) !== String(id))
     );
 
     setShowPreview(false);
@@ -120,9 +140,7 @@ function Checkout() {
 
   function goBack() {
     navigate("/", {
-      state: {
-        cart: items,
-      },
+      state: { cart: items },
     });
   }
 
@@ -156,7 +174,7 @@ function Checkout() {
       const blob = pdf.output("blob");
 
       if (!blob || blob.size === 0) {
-        throw new Error("The invoice PDF is empty.");
+        throw new Error("The PDF is empty.");
       }
 
       const file = new File(
@@ -176,7 +194,7 @@ function Checkout() {
       console.error("Invoice preparation error:", error);
       alert(
         "Unable to prepare the PDF: " +
-          (error?.message || "Please try again.")
+        (error?.message || "Please try again.")
       );
     }
   }
@@ -190,8 +208,116 @@ function Checkout() {
     window.print();
   }
 
+  async function saveOrderToHistory() {
+    if (!showPreview) {
+      alert("Please preview the catering order first.");
+      return;
+    }
+
+    if (savedOrderId) {
+      alert("This order has already been saved to Order History.");
+      return;
+    }
+
+    if (savingOrder) return;
+
+    setSavingOrder(true);
+
+    try {
+      const guests = Number(customer.guests);
+      const perPlatePrice = Number(customer.perPlatePrice || 0);
+      const advanceAmount = Number(customer.advanceAmount || 0);
+
+      if (!Number.isInteger(guests) || guests < 1) {
+        throw new Error("Please enter a valid number of guests.");
+      }
+
+      if (!Number.isFinite(perPlatePrice) || perPlatePrice < 0) {
+        throw new Error("Please enter a valid per-plate price.");
+      }
+
+      if (!Number.isFinite(advanceAmount) || advanceAmount < 0) {
+        throw new Error("Please enter a valid advance amount.");
+      }
+
+      const orderPayload = {
+        customer_name: customer.name.trim(),
+        phone: customer.phone.trim(),
+        event_date: customer.eventDate,
+        event_time: customer.eventTime || "",
+        guests,
+        address: customer.address.trim(),
+        per_plate_price: perPlatePrice,
+        advance_amount: advanceAmount,
+        final_amount: guests * perPlatePrice,
+      };
+
+      const itemPayload = items.map((item) => ({
+        id: item.id,
+        name: item.name,
+        quantity: Number(item.quantity || 0),
+        price: item.price ?? null,
+      }));
+
+      if (
+        itemPayload.some(
+          (item) =>
+            !item.id ||
+            !item.name ||
+            !Number.isInteger(item.quantity) ||
+            item.quantity < 1
+        )
+      ) {
+        throw new Error("One or more selected dishes have invalid details.");
+      }
+
+      const { data: orderId, error: saveError } = await supabase.rpc(
+        "create_catering_order",
+        {
+          p_order: orderPayload,
+          p_items: itemPayload,
+        }
+      );
+
+      if (saveError) throw saveError;
+
+      if (!orderId) {
+        throw new Error("The database did not return an order ID.");
+      }
+
+      setSavedOrderId(orderId);
+
+      const { data: savedOrder, error: fetchError } = await supabase
+        .from("orders")
+        .select("bill_number")
+        .eq("id", orderId)
+        .single();
+
+      if (fetchError) {
+        console.error("Bill number lookup error:", fetchError);
+      }
+
+      setSavedBillNumber(savedOrder?.bill_number || "");
+
+      alert(
+        `Order saved successfully!${savedOrder?.bill_number
+          ? ` Bill Number: ${savedOrder.bill_number}`
+          : ""
+        }`
+      );
+    } catch (err) {
+      console.error("Order saving error:", err);
+      alert(
+        "Unable to save order: " +
+        (err.message || "Please try again.")
+      );
+    } finally {
+      setSavingOrder(false);
+    }
+  }
+
   // ------------------------------------------------
-  // PDF GENERATION
+  // CATERING ORDER PDF
   // ------------------------------------------------
 
   function createInvoicePDF() {
@@ -207,29 +333,39 @@ function Checkout() {
     const contentWidth = pageWidth - margin * 2;
 
     const gold = [139, 103, 47];
-    const darkGold = [121, 87, 42];
+    const darkGold = [105, 76, 36];
     const lightGold = [242, 232, 212];
+    const cream = [255, 253, 247];
     const ink = [52, 43, 32];
     const muted = [130, 109, 75];
 
     let y = 15;
 
     function drawBorder() {
+      pdf.setFillColor(...cream);
+      pdf.rect(0, 0, pageWidth, pageHeight, "F");
+
       pdf.setDrawColor(...gold);
-      pdf.setLineWidth(0.7);
+      pdf.setLineWidth(0.65);
       pdf.rect(7, 7, pageWidth - 14, pageHeight - 14);
+
+      pdf.setDrawColor(225, 210, 181);
+      pdf.setLineWidth(0.25);
+      pdf.rect(9.5, 9.5, pageWidth - 19, pageHeight - 19);
     }
 
     function drawHeader() {
       pdf.setTextColor(...darkGold);
       pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(22);
+      pdf.setFontSize(21);
       pdf.text("LAXMI NRUSINGHA", pageWidth / 2, y + 7, {
         align: "center",
       });
 
       y += 13;
-      pdf.setFontSize(18);
+
+      pdf.setFontSize(17);
+      pdf.setTextColor(...gold);
       pdf.text("CATTERS", pageWidth / 2, y + 4, {
         align: "center",
       });
@@ -252,18 +388,18 @@ function Checkout() {
 
       pdf.setFillColor(...gold);
       pdf.roundedRect(
-        pageWidth / 2 - 42,
+        pageWidth / 2 - 43,
         y - 5,
-        84,
+        86,
         12,
-        1,
-        1,
+        1.5,
+        1.5,
         "F"
       );
 
       pdf.setTextColor(255, 250, 240);
       pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(11);
+      pdf.setFontSize(10);
       pdf.text(
         "CATERING ORDER DETAILS",
         pageWidth / 2,
@@ -279,6 +415,12 @@ function Checkout() {
       y = 15;
       drawBorder();
       drawHeader();
+    }
+
+    function ensureSpace(height) {
+      if (y + height > pageHeight - 20) {
+        addNewPage();
+      }
     }
 
     drawBorder();
@@ -298,35 +440,44 @@ function Checkout() {
 
     y += 9;
 
-    // Customer and event information box
+    // Customer and event information panel.
+    const detailsHeight = 57;
+
     pdf.setFillColor(248, 242, 230);
     pdf.roundedRect(
       margin,
       y,
       contentWidth,
-      52,
+      detailsHeight,
       2,
       2,
       "F"
     );
 
-    pdf.setTextColor(...darkGold);
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(9);
-
-    pdf.text("CUSTOMER DETAILS", margin + 4, y + 7);
-    pdf.text(
-      "EVENT DETAILS",
-      margin + contentWidth / 2 + 3,
-      y + 7
+    pdf.setDrawColor(225, 210, 181);
+    pdf.roundedRect(
+      margin,
+      y,
+      contentWidth,
+      detailsHeight,
+      2,
+      2,
+      "S"
     );
-
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(7.5);
-    pdf.setTextColor(...ink);
 
     const leftX = margin + 4;
     const rightX = margin + contentWidth / 2 + 3;
+
+    pdf.setTextColor(...darkGold);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8.5);
+
+    pdf.text("CUSTOMER DETAILS", leftX, y + 7);
+    pdf.text("EVENT DETAILS", rightX, y + 7);
+
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(7.3);
+    pdf.setTextColor(...ink);
 
     pdf.text(`Name: ${customer.name}`, leftX, y + 14);
     pdf.text(`Phone: ${customer.phone}`, leftX, y + 20);
@@ -336,11 +487,11 @@ function Checkout() {
       contentWidth / 2 - 9
     );
 
-    pdf.text(addressLines, leftX, y + 26);
+    pdf.text(addressLines.slice(0, 3), leftX, y + 27);
 
     pdf.text(`Event Date: ${customer.eventDate}`, rightX, y + 14);
     pdf.text(
-      `Event Time: ${customer.eventTime || "Not specified"}`,
+      `Event Time: ${formatEventTime(customer.eventTime)}`,
       rightX,
       y + 20
     );
@@ -355,15 +506,10 @@ function Checkout() {
       rightX,
       y + 38
     );
-    pdf.text(
-      `Menu Items: ${allMenuRows.length}`,
-      rightX,
-      y + 44
-    );
+    pdf.text(`Menu Items: ${allMenuRows.length}`, rightX, y + 44);
 
-    y += 61;
+    y += detailsHeight + 9;
 
-    // Full menu, including unselected dishes.
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(11);
     pdf.setTextColor(...darkGold);
@@ -379,28 +525,26 @@ function Checkout() {
     const columns = {
       number: margin + 2,
       dish: margin + 12,
-      category: margin + 92,
-      status: pageWidth - margin - 35,
+      status: pageWidth - margin - 38,
       quantity: pageWidth - margin - 8,
     };
 
     function drawTableHeader() {
       pdf.setFillColor(...lightGold);
-      pdf.rect(margin, y, contentWidth, 10, "F");
+      pdf.rect(margin, y, contentWidth, 9, "F");
 
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(7.5);
       pdf.setTextColor(...darkGold);
 
-      pdf.text("NO.", columns.number, y + 6.5);
-      pdf.text("DISH", columns.dish, y + 6.5);
-      pdf.text("CATEGORY", columns.category, y + 6.5);
-      pdf.text("STATUS", columns.status, y + 6.5);
-      pdf.text("QTY", columns.quantity, y + 6.5, {
+      pdf.text("NO.", columns.number, y + 6);
+      pdf.text("DISH", columns.dish, y + 6);
+      pdf.text("STATUS", columns.status, y + 6);
+      pdf.text("QTY", columns.quantity, y + 6, {
         align: "center",
       });
 
-      y += 10;
+      y += 9;
     }
 
     drawTableHeader();
@@ -410,20 +554,31 @@ function Checkout() {
     completeMenu.forEach((category) => {
       const categoryItems = category.items || [];
 
-      if (y + 10 > pageHeight - 20) {
-        addNewPage();
-        drawTableHeader();
-      }
+      ensureSpace(12);
 
-      // Category separator row
+      // Category heading.
       pdf.setFillColor(248, 242, 230);
       pdf.rect(margin, y, contentWidth, 7, "F");
+
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(8);
       pdf.setTextColor(...darkGold);
-      pdf.text(String(category.name || "Category"), margin + 3, y + 5);
+      pdf.text(
+        String(category.name || "Category"),
+        margin + 3,
+        y + 5
+      );
 
       y += 7;
+
+      if (!categoryItems.length) {
+        ensureSpace(7);
+        pdf.setFont("helvetica", "italic");
+        pdf.setFontSize(7.5);
+        pdf.setTextColor(...muted);
+        pdf.text("No dishes in this category.", margin + 4, y + 5);
+        y += 8;
+      }
 
       categoryItems.forEach((dish) => {
         rowNumber += 1;
@@ -433,18 +588,9 @@ function Checkout() {
           String(dish.name || "Dish"),
           72
         );
-        const categoryLines = pdf.splitTextToSize(
-          String(category.name || "Uncategorized"),
-          35
-        );
 
-        const rowHeight =
-          Math.max(dishLines.length, categoryLines.length, 1) * 4.2 + 4;
-
-        if (y + rowHeight > pageHeight - 18) {
-          addNewPage();
-          drawTableHeader();
-        }
+        const rowHeight = Math.max(7, dishLines.length * 4.1 + 3);
+        ensureSpace(rowHeight + 1);
 
         if (rowNumber % 2 === 0) {
           pdf.setFillColor(252, 248, 239);
@@ -457,12 +603,12 @@ function Checkout() {
 
         pdf.text(String(rowNumber), columns.number, y + 5);
         pdf.text(dishLines, columns.dish, y + 5);
-        pdf.text(categoryLines, columns.category, y + 5);
 
         if (selected) {
-          pdf.setTextColor(35, 125, 75);
           pdf.setFont("helvetica", "bold");
+          pdf.setTextColor(35, 125, 75);
           pdf.text("SELECTED", columns.status, y + 5);
+
           pdf.setTextColor(...ink);
           pdf.text(
             String(selected.quantity || 0),
@@ -473,7 +619,7 @@ function Checkout() {
         } else if (dish.is_available === false) {
           pdf.setTextColor(160, 80, 65);
           pdf.text("UNAVAILABLE", columns.status, y + 5);
-          pdf.setTextColor(...ink);
+          pdf.setTextColor(...muted);
           pdf.text("—", columns.quantity, y + 5, {
             align: "center",
           });
@@ -499,16 +645,13 @@ function Checkout() {
       y += 3;
     });
 
-    // Footer
-    if (y + 24 > pageHeight - 15) {
-      addNewPage();
-    }
+    ensureSpace(22);
 
-    y += 5;
+    y += 4;
     pdf.setDrawColor(...gold);
     pdf.line(margin, y, pageWidth - margin, y);
-    y += 8;
 
+    y += 8;
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(9);
     pdf.setTextColor(...darkGold);
@@ -520,7 +663,7 @@ function Checkout() {
     );
 
     y += 6;
-    pdf.setFont("helvetica", "normal");
+    pdf.setFont("helvetica", "italic");
     pdf.setFontSize(8);
     pdf.setTextColor(...muted);
     pdf.text(
@@ -530,6 +673,21 @@ function Checkout() {
       { align: "center" }
     );
 
+    const totalPages = pdf.internal.getNumberOfPages();
+
+    for (let page = 1; page <= totalPages; page += 1) {
+      pdf.setPage(page);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(7);
+      pdf.setTextColor(...muted);
+      pdf.text(
+        `LAXMI NRUSINGHA CATTERS  •  ${page} / ${totalPages}`,
+        pageWidth / 2,
+        pageHeight - 12,
+        { align: "center" }
+      );
+    }
+
     return pdf;
   }
 
@@ -537,10 +695,10 @@ function Checkout() {
   // DOWNLOAD PDF
   // ------------------------------------------------
 
-  function downloadInvoice(pdf = null) {
+  function downloadInvoice() {
     try {
-      const documentPdf = pdf || createInvoicePDF();
-      const blob = documentPdf.output("blob");
+      const pdf = createInvoicePDF();
+      const blob = pdf.output("blob");
 
       if (!blob || blob.size === 0) {
         throw new Error("The generated PDF is empty.");
@@ -557,11 +715,9 @@ function Checkout() {
       link.remove();
 
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      return true;
     } catch (error) {
       console.error("PDF download error:", error);
       alert("Unable to download PDF: " + error.message);
-      return false;
     }
   }
 
@@ -581,7 +737,7 @@ function Checkout() {
       `LAXMI NRUSINGHA CATTERS\n` +
       `Catering Order Details for ${customer.name}\n` +
       `Event Date: ${customer.eventDate}\n` +
-      `Event Time: ${customer.eventTime || "Not specified"}\n` +
+      `Event Time: ${formatEventTime(customer.eventTime)}\n` +
       `Guests: ${customer.guests}\n` +
       `Per Plate: Rs. ${Number(customer.perPlatePrice || 0).toFixed(2)}\n` +
       `Advance: Rs. ${Number(customer.advanceAmount || 0).toFixed(2)}`;
@@ -609,7 +765,7 @@ function Checkout() {
         "https://wa.me/?text=" +
         encodeURIComponent(
           caption +
-            "\n\nThe PDF has been downloaded. Please attach it before sending."
+          "\n\nThe PDF has been downloaded. Please attach it before sending."
         );
 
       window.open(whatsappUrl, "_blank", "noopener,noreferrer");
@@ -617,7 +773,9 @@ function Checkout() {
       if (error?.name === "AbortError") return;
 
       console.error("Sharing error:", error);
-      alert("Unable to open sharing. Please download the PDF and attach it manually.");
+      alert(
+        "Unable to open sharing. Please download the PDF and attach it manually."
+      );
     } finally {
       setSharing(false);
     }
@@ -629,539 +787,428 @@ function Checkout() {
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Playfair+Display:wght@400;500;600;700&family=Cormorant+Garamond:wght@500;600;700&display=swap');
 
         .checkout-page {
-          --gold: #b18a43;
-          --gold-dark: #80602d;
-          --ink: #342b20;
-          max-width: 1120px;
-          margin: 35px auto;
-          padding: 22px;
-          color: var(--ink);
-          font-family: 'DM Sans', Arial, sans-serif;
+          --gold:#b18a43;
+          --gold-dark:#80602d;
+          --ink:#342b20;
+          max-width:1120px;
+          margin:35px auto;
+          padding:22px;
+          color:var(--ink);
+          font-family:'DM Sans',Arial,sans-serif;
         }
-
-        .checkout-page * { box-sizing: border-box; }
-
-        .checkout-page h1,
-        .checkout-page h2,
-        .checkout-page h3 {
-          font-family: 'Playfair Display', Georgia, serif;
+        .checkout-page * {box-sizing:border-box;}
+        .checkout-page h1,.checkout-page h2,.checkout-page h3 {
+          font-family:'Playfair Display',Georgia,serif;
         }
-
-        .checkout-heading {
-          text-align: center;
-          margin: 28px 0;
-        }
-
+        .checkout-heading {text-align:center;margin:28px 0;}
         .checkout-heading h1 {
-          color: #98743b;
-          font-size: clamp(28px, 4vw, 39px);
-          margin: 0 0 8px;
+          color:#98743b;
+          font-size:clamp(28px,4vw,39px);
+          margin:0 0 8px;
         }
-
         .checkout-heading p {
-          color: #9a896b;
-          letter-spacing: 3px;
-          font-size: 11px;
-          font-weight: 800;
+          color:#9a896b;
+          letter-spacing:3px;
+          font-size:11px;
+          font-weight:800;
         }
-
         .checkout-card {
-          background: linear-gradient(145deg, #fff, #fcf9f1);
-          border: 1px solid #e8dcc4;
-          border-radius: 18px;
-          padding: 28px;
-          margin-bottom: 24px;
-          box-shadow: 0 12px 35px rgba(66,48,16,.055);
+          background:linear-gradient(145deg,#fff,#fcf9f1);
+          border:1px solid #e8dcc4;
+          border-radius:18px;
+          padding:28px;
+          margin-bottom:24px;
+          box-shadow:0 12px 35px rgba(66,48,16,.055);
         }
-
         .checkout-card h2 {
-          color: #98743b;
-          margin: 0 0 22px;
-          font-size: 24px;
+          color:#98743b;
+          margin:0 0 22px;
+          font-size:24px;
         }
-
-        .checkout-page input,
-        .checkout-page textarea {
-          width: 100%;
-          padding: 13px 14px;
-          border: 1px solid #ded1b8;
-          border-radius: 9px;
-          margin-top: 8px;
-          background: #fffefa;
-          color: var(--ink);
-          font: inherit;
+        .checkout-page input,.checkout-page textarea {
+          width:100%;
+          padding:13px 14px;
+          border:1px solid #ded1b8;
+          border-radius:9px;
+          margin-top:8px;
+          background:#fffefa;
+          color:var(--ink);
+          font:inherit;
         }
-
-        .checkout-page input:focus,
-        .checkout-page textarea:focus {
-          outline: none;
-          border-color: #b18a43;
-          box-shadow: 0 0 0 4px rgba(177,138,67,.13);
+        .checkout-page input:focus,.checkout-page textarea:focus {
+          outline:none;
+          border-color:#b18a43;
+          box-shadow:0 0 0 4px rgba(177,138,67,.13);
         }
-
         .checkout-fields {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 19px;
+          display:grid;
+          grid-template-columns:repeat(2,minmax(0,1fr));
+          gap:19px;
         }
-
         .checkout-fields label {
-          font-weight: 700;
-          font-size: 13px;
-          color: #514630;
+          font-weight:700;
+          font-size:13px;
+          color:#514630;
         }
-
         .checkout-actions {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 12px;
-          margin-top: 22px;
+          display:flex;
+          flex-wrap:wrap;
+          gap:12px;
+          margin-top:22px;
         }
-
         .checkout-btn {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 9px;
-          border: 1px solid #b18a43;
-          border-radius: 9px;
-          padding: 13px 20px;
-          background: linear-gradient(135deg, #ead8ad, #c4a467);
-          color: #352613;
-          font-weight: 800;
-          cursor: pointer;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          gap:9px;
+          border:1px solid #b18a43;
+          border-radius:9px;
+          padding:13px 20px;
+          background:linear-gradient(135deg,#ead8ad,#c4a467);
+          color:#352613;
+          font-weight:800;
+          cursor:pointer;
         }
-
         .checkout-btn.secondary {
-          background: #fffaf0;
-          color: #72562b;
-          border-color: #e2d2b2;
+          background:#fffaf0;
+          color:#72562b;
+          border-color:#e2d2b2;
         }
-
         .bill-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 15px;
-          padding: 17px 0;
-          border-bottom: 1px solid #eee7da;
+          display:flex;
+          justify-content:space-between;
+          align-items:center;
+          gap:15px;
+          padding:17px 0;
+          border-bottom:1px solid #eee7da;
         }
-
         .quantity-controls {
-          display: flex;
-          align-items: center;
-          gap: 10px;
+          display:flex;
+          align-items:center;
+          gap:10px;
         }
-
         .quantity-controls button {
-          width: 33px;
-          height: 33px;
-          display: grid;
-          place-items: center;
-          border: 1px solid #d6c49f;
-          background: #fffaf0;
-          color: #805e25;
-          border-radius: 8px;
-          cursor: pointer;
+          width:33px;
+          height:33px;
+          display:grid;
+          place-items:center;
+          border:1px solid #d6c49f;
+          background:#fffaf0;
+          color:#805e25;
+          border-radius:8px;
+          cursor:pointer;
         }
-
         .dish-category {
-          display: inline-block;
-          margin-top: 6px;
-          padding: 5px 10px;
-          border: 1px solid #e5d3ad;
-          border-radius: 20px;
-          background: #fff9ed;
-          color: #896a32;
-          font-size: 11px;
-          font-weight: 700;
+          display:inline-block;
+          margin-top:6px;
+          padding:5px 10px;
+          border:1px solid #e5d3ad;
+          border-radius:20px;
+          background:#fff9ed;
+          color:#896a32;
+          font-size:11px;
+          font-weight:700;
         }
-
         .remove-dish {
-          border: 0;
-          background: transparent;
-          color: #b34b3d;
-          cursor: pointer;
-          padding: 7px;
+          border:0;
+          background:transparent;
+          color:#b34b3d;
+          cursor:pointer;
+          padding:7px;
         }
 
-        /* DOCUMENT PREVIEW */
-
+        /* PREMIUM DOCUMENT PREVIEW */
         .invoice-print {
-          width: 100%;
-          max-width: 850px;
-          margin: 28px auto;
-          padding: 18px;
-          background: #fffdf8;
-          color: #342b20;
-          border: 2px solid #b18a43;
-          border-radius: 8px;
-          box-shadow: 0 18px 55px rgba(77,55,20,.12);
+          width:100%;
+          max-width:850px;
+          margin:28px auto;
+          padding:18px;
+          background:#fffdf8;
+          color:#342b20;
+          border:2px solid #b18a43;
+          border-radius:8px;
+          box-shadow:0 18px 55px rgba(77,55,20,.12);
         }
-
         .invoice-inner {
-          border: 1px solid #e5d5b5;
-          padding: 24px;
-          background: #fffdf8;
+          border:1px solid #e5d5b5;
+          padding:24px;
+          background:#fffdf8;
         }
-
         .invoice-header {
-          text-align: center;
-          padding: 17px 12px 23px;
-          border-bottom: 1px solid #e4d3b1;
+          text-align:center;
+          padding:17px 12px 23px;
+          border-bottom:1px solid #e4d3b1;
         }
-
         .invoice-ornament {
-          color: #b18a43;
-          font-family: 'Cormorant Garamond', Georgia, serif;
-          font-size: 30px;
-          margin-bottom: 8px;
+          color:#b18a43;
+          font-family:'Cormorant Garamond',Georgia,serif;
+          font-size:30px;
+          margin-bottom:8px;
         }
-
         .invoice-brand {
-          color: #79572a;
-          font-family: 'Cormorant Garamond', Georgia, serif;
-          font-size: clamp(29px, 5vw, 43px);
-          font-weight: 700;
-          letter-spacing: 2px;
-          line-height: 1.05;
-          margin: 0;
+          color:#79572a;
+          font-family:'Cormorant Garamond',Georgia,serif;
+          font-size:clamp(29px,5vw,43px);
+          font-weight:700;
+          letter-spacing:2px;
+          line-height:1.05;
+          margin:0;
         }
-
         .invoice-brand-sub {
-          color: #98743b;
-          font-family: 'Cormorant Garamond', Georgia, serif;
-          font-size: 25px;
-          letter-spacing: 5px;
-          font-weight: 600;
-          margin: 4px 0 12px;
+          color:#98743b;
+          font-family:'Cormorant Garamond',Georgia,serif;
+          font-size:25px;
+          letter-spacing:5px;
+          font-weight:600;
+          margin:4px 0 12px;
         }
-
         .invoice-subtitle {
-          margin: 0;
-          color: #9a825b;
-          font-size: 11px;
-          letter-spacing: 3px;
-          font-weight: 800;
+          margin:0;
+          color:#9a825b;
+          font-size:11px;
+          letter-spacing:3px;
+          font-weight:800;
         }
-
         .invoice-title {
-          display: inline-block;
-          margin-top: 15px;
-          padding: 10px 25px;
-          background: linear-gradient(135deg, #8b672f, #c5a568, #8b672f);
-          border: 1px solid #9a743b;
-          color: #fffaf0;
-          font-family: 'Playfair Display', Georgia, serif;
-          font-size: 18px;
-          letter-spacing: 2px;
+          display:inline-block;
+          margin-top:15px;
+          padding:10px 25px;
+          background:linear-gradient(135deg,#8b672f,#c5a568,#8b672f);
+          border:1px solid #9a743b;
+          color:#fffaf0;
+          font-family:'Playfair Display',Georgia,serif;
+          font-size:18px;
+          letter-spacing:2px;
         }
-
         .invoice-meta {
-          display: flex;
-          justify-content: space-between;
-          flex-wrap: wrap;
-          gap: 8px;
-          margin-top: 14px;
-          color: #927b54;
-          font-size: 11px;
-          font-weight: 700;
+          display:flex;
+          justify-content:space-between;
+          flex-wrap:wrap;
+          gap:8px;
+          margin-top:14px;
+          color:#927b54;
+          font-size:11px;
+          font-weight:700;
         }
-
         .invoice-details {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 15px;
-          padding: 24px 0;
+          display:grid;
+          grid-template-columns:1fr 1fr;
+          gap:15px;
+          padding:24px 0;
         }
-
         .invoice-detail-box {
-          background: linear-gradient(145deg, #fffefa, #f8f2e6);
-          border: 1px solid #e8d8b9;
-          border-radius: 8px;
-          padding: 17px;
-          min-width: 0;
+          background:linear-gradient(145deg,#fffefa,#f8f2e6);
+          border:1px solid #e8d8b9;
+          border-radius:8px;
+          padding:17px;
+          min-width:0;
         }
-
         .invoice-detail-heading {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin: 0 0 14px;
-          color: #8c682f;
-          font-family: 'DM Sans', Arial, sans-serif;
-          font-size: 12px;
-          letter-spacing: 1px;
-          text-transform: uppercase;
-          font-weight: 800;
-          padding-bottom: 9px;
-          border-bottom: 1px solid #eadfc9;
+          display:flex;
+          align-items:center;
+          gap:8px;
+          margin:0 0 14px;
+          color:#8c682f;
+          font-family:'DM Sans',Arial,sans-serif;
+          font-size:12px;
+          letter-spacing:1px;
+          text-transform:uppercase;
+          font-weight:800;
+          padding-bottom:9px;
+          border-bottom:1px solid #eadfc9;
         }
-
         .invoice-detail-box p {
-          display: flex;
-          align-items: flex-start;
-          gap: 7px;
-          margin: 9px 0;
-          font-size: 12px;
-          line-height: 1.55;
-          overflow-wrap: anywhere;
+          display:flex;
+          align-items:flex-start;
+          gap:7px;
+          margin:9px 0;
+          font-size:12px;
+          line-height:1.55;
+          overflow-wrap:anywhere;
         }
-
         .invoice-detail-box p strong {
-          color: #70562f;
-          min-width: 83px;
+          color:#70562f;
+          min-width:83px;
         }
-
         .invoice-menu-heading {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 12px;
-          margin: 12px 0 15px;
-          color: #8c682f;
-          font-family: 'Playfair Display', Georgia, serif;
-          font-size: 19px;
-          letter-spacing: 1px;
-          text-align: center;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          gap:12px;
+          margin:12px 0 15px;
+          color:#8c682f;
+          font-family:'Playfair Display',Georgia,serif;
+          font-size:19px;
+          letter-spacing:1px;
+          text-align:center;
         }
-
-        .invoice-menu-heading::before,
-        .invoice-menu-heading::after {
-          content: '';
-          flex: 1;
-          height: 1px;
-          background: #dfc99e;
+        .invoice-menu-heading::before,.invoice-menu-heading::after {
+          content:'';
+          flex:1;
+          height:1px;
+          background:#dfc99e;
         }
-
         .invoice-category-heading {
-          margin-top: 18px;
-          padding: 10px 12px;
-          background: #f2e8d4;
-          color: #715329;
-          font-weight: 800;
-          font-size: 13px;
-          border: 1px solid #e3d2ad;
+          margin-top:18px;
+          padding:10px 12px;
+          background:#f2e8d4;
+          color:#715329;
+          font-weight:800;
+          font-size:13px;
+          border:1px solid #e3d2ad;
         }
-
-        .invoice-table-wrap {
-          width: 100%;
-          overflow-x: auto;
-        }
-
+        .invoice-table-wrap {width:100%;overflow-x:auto;}
         .invoice-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 12px;
+          width:100%;
+          border-collapse:collapse;
+          font-size:12px;
         }
-
         .invoice-table th {
-          background: #faf6ec;
-          color: #715329;
-          padding: 11px 9px;
-          text-align: left;
-          border-bottom: 1px solid #d9c295;
-          font-size: 10px;
-          letter-spacing: .3px;
+          background:#faf6ec;
+          color:#715329;
+          padding:11px 9px;
+          text-align:left;
+          border-bottom:1px solid #d9c295;
+          font-size:10px;
+          letter-spacing:.3px;
         }
-
         .invoice-table td {
-          padding: 11px 9px;
-          border-bottom: 1px solid #eee5d4;
-          vertical-align: top;
-          overflow-wrap: anywhere;
+          padding:11px 9px;
+          border-bottom:1px solid #eee5d4;
+          vertical-align:top;
+          overflow-wrap:anywhere;
         }
-
-        .invoice-table tbody tr:nth-child(even) {
-          background: #fcf8ef;
-        }
-
-        .selected-label {
-          color: #237d4b;
-          font-weight: 800;
-        }
-
-        .not-selected-label {
-          color: #93846c;
-        }
-
-        .unavailable-label {
-          color: #a05041;
-          font-weight: 700;
-        }
-
+        .invoice-table tbody tr:nth-child(even) {background:#fcf8ef;}
+        .selected-label {color:#237d4b;font-weight:800;}
+        .not-selected-label {color:#93846c;}
+        .unavailable-label {color:#a05041;font-weight:700;}
         .invoice-footer {
-          margin-top: 28px;
-          padding-top: 20px;
-          border-top: 1px solid #e5d5b5;
-          text-align: center;
-          color: #846a42;
-          font-family: 'Cormorant Garamond', Georgia, serif;
-          font-size: 18px;
-          font-style: italic;
+          margin-top:28px;
+          padding-top:20px;
+          border-top:1px solid #e5d5b5;
+          text-align:center;
+          color:#846a42;
+          font-family:'Cormorant Garamond',Georgia,serif;
+          font-size:18px;
+          font-style:italic;
         }
-
-        .invoice-footer p { margin: 5px 0; }
-
+        .invoice-footer p {margin:5px 0;}
         .invoice-footer .footer-small {
-          margin-top: 12px;
-          font-family: 'DM Sans', Arial, sans-serif;
-          font-style: normal;
-          font-size: 9px;
-          font-weight: 700;
-          letter-spacing: 2px;
-          color: #a58b5c;
+          margin-top:12px;
+          font-family:'DM Sans',Arial,sans-serif;
+          font-style:normal;
+          font-size:9px;
+          font-weight:700;
+          letter-spacing:2px;
+          color:#a58b5c;
         }
-
         .share-section {
-          margin: 28px auto;
-          padding: 28px;
-          background: linear-gradient(135deg, #352b1d, #51412b);
-          border: 1px solid rgba(197,165,104,.4);
-          border-radius: 17px;
-          color: white;
+          margin:28px auto;
+          padding:28px;
+          background:linear-gradient(135deg,#352b1d,#51412b);
+          border:1px solid rgba(197,165,104,.4);
+          border-radius:17px;
+          color:white;
         }
-
         .share-section h2 {
-          color: #ead6a9;
-          margin: 0 0 10px;
-          font-size: 24px;
+          color:#ead6a9;
+          margin:0 0 10px;
+          font-size:24px;
         }
-
         .share-btn {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-          min-height: 48px;
-          margin: 8px 8px 0 0;
-          padding: 12px 20px;
-          border: 0;
-          border-radius: 9px;
-          color: white;
-          font-size: 14px;
-          font-weight: 800;
-          cursor: pointer;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          gap:10px;
+          min-height:48px;
+          margin:8px 8px 0 0;
+          padding:12px 20px;
+          border:0;
+          border-radius:9px;
+          color:white;
+          font-size:14px;
+          font-weight:800;
+          cursor:pointer;
         }
-
         .share-btn.whatsapp {
-          background: linear-gradient(135deg, #20bd5a, #128c45);
+          background:linear-gradient(135deg,#20bd5a,#128c45);
         }
-
-        .share-btn:disabled {
-          opacity: .6;
-          cursor: wait;
-        }
-
+        .share-btn:disabled {opacity:.6;cursor:wait;}
         .print-btn {
-          width: 100%;
-          margin-top: 14px;
-          padding: 15px;
-          background: linear-gradient(135deg, #ead8ad, #c4a467);
-          color: #352613;
-          border: 1px solid #d1b675;
-          border-radius: 10px;
-          font-weight: 900;
-          font-size: 15px;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
+          width:100%;
+          margin-top:14px;
+          padding:15px;
+          background:linear-gradient(135deg,#ead8ad,#c4a467);
+          color:#352613;
+          border:1px solid #d1b675;
+          border-radius:10px;
+          font-weight:900;
+          font-size:15px;
+          cursor:pointer;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          gap:10px;
         }
 
-        @media(max-width: 650px) {
-          .checkout-page {
-            margin: 12px auto;
-            padding: 13px;
-          }
-
-          .checkout-fields,
-          .invoice-details {
-            grid-template-columns: 1fr;
-          }
-
-          .checkout-card { padding: 18px; }
-
-          .invoice-print { padding: 9px; }
-          .invoice-inner { padding: 13px 9px; }
-          .invoice-brand { font-size: 27px; }
-          .invoice-brand-sub { font-size: 21px; }
-          .invoice-subtitle {
-            font-size: 9px;
-            letter-spacing: 1.5px;
-          }
-
-          .invoice-title {
-            font-size: 14px;
-            padding: 8px 14px;
-          }
-
-          .invoice-table { font-size: 10px; }
-          .invoice-table th,
-          .invoice-table td { padding: 8px 4px; }
-
-          .invoice-detail-box { padding: 13px; }
-          .share-section { padding: 18px; }
-          .bill-row { flex-wrap: wrap; }
+        @media(max-width:650px) {
+          .checkout-page {margin:12px auto;padding:13px;}
+          .checkout-fields,.invoice-details {grid-template-columns:1fr;}
+          .checkout-card {padding:18px;}
+          .invoice-print {padding:9px;}
+          .invoice-inner {padding:13px 9px;}
+          .invoice-brand {font-size:27px;}
+          .invoice-brand-sub {font-size:21px;}
+          .invoice-subtitle {font-size:9px;letter-spacing:1.5px;}
+          .invoice-title {font-size:14px;padding:8px 14px;}
+          .invoice-table {font-size:10px;}
+          .invoice-table th,.invoice-table td {padding:8px 4px;}
+          .invoice-detail-box {padding:13px;}
+          .share-section {padding:18px;}
+          .bill-row {flex-wrap:wrap;}
         }
 
         @media print {
-          @page {
-            size: A4 portrait;
-            margin: 10mm;
+          @page {size:A4 portrait;margin:10mm;}
+          html,body {
+            margin:0!important;
+            padding:0!important;
+            background:#fffdf8!important;
           }
-
-          html, body {
-            margin: 0 !important;
-            padding: 0 !important;
-            background: #fffdf8 !important;
-          }
-
-          body * { visibility: hidden !important; }
-          .no-print { display: none !important; }
-
-          .invoice-print,
-          .invoice-print * {
-            visibility: visible !important;
-          }
-
+          body * {visibility:hidden!important;}
+          .no-print {display:none!important;}
+          .invoice-print,.invoice-print * {visibility:visible!important;}
           .invoice-print {
-            display: block !important;
-            position: relative !important;
-            width: 100% !important;
-            max-width: none !important;
-            margin: 0 auto !important;
-            padding: 8px !important;
-            background: #fffdf8 !important;
-            border: 2px solid #b18a43 !important;
-            box-shadow: none !important;
-            overflow: visible !important;
-            print-color-adjust: exact !important;
-            -webkit-print-color-adjust: exact !important;
+            display:block!important;
+            position:relative!important;
+            width:100%!important;
+            max-width:none!important;
+            margin:0 auto!important;
+            padding:8px!important;
+            background:#fffdf8!important;
+            border:2px solid #b18a43!important;
+            box-shadow:none!important;
+            overflow:visible!important;
+            print-color-adjust:exact!important;
+            -webkit-print-color-adjust:exact!important;
           }
-
-          .invoice-inner { padding: 15px !important; }
-
+          .invoice-inner {padding:15px!important;}
           .invoice-details {
-            display: grid !important;
-            grid-template-columns: 1fr 1fr !important;
-            gap: 10px !important;
-            padding: 15px 0 !important;
+            display:grid!important;
+            grid-template-columns:1fr 1fr!important;
+            gap:10px!important;
+            padding:15px 0!important;
           }
-
           .invoice-detail-box {
-            background: #f8f2e6 !important;
-            break-inside: avoid;
+            background:#f8f2e6!important;
+            break-inside:avoid;
           }
-
           .invoice-table {
-            width: 100% !important;
-            font-size: 9px !important;
+            width:100%!important;
+            font-size:9px!important;
           }
-
-          .invoice-table tr { break-inside: avoid; }
-          .invoice-category-heading { break-after: avoid; }
+          .invoice-table tr {break-inside:avoid;}
+          .invoice-category-heading {break-after:avoid;}
         }
       `}</style>
 
@@ -1270,6 +1317,18 @@ function Checkout() {
                 value={customer.eventTime}
                 onChange={updateCustomer}
               />
+              {customer.eventTime && (
+                <small
+                  style={{
+                    display: "block",
+                    marginTop: 6,
+                    color: "#896a32",
+                    fontWeight: 700,
+                  }}
+                >
+                  Display time: {formatEventTime(customer.eventTime)}
+                </small>
+              )}
             </label>
 
             <label>
@@ -1336,7 +1395,7 @@ function Checkout() {
 
       {showPreview && (
         <>
-          <section className="invoice-print" ref={invoiceRef}>
+          <section className="invoice-print">
             <div className="invoice-inner">
               <div className="invoice-header">
                 <div className="invoice-ornament">✦ ❧ ✦</div>
@@ -1397,7 +1456,7 @@ function Checkout() {
                   <p>
                     <Clock size={13} />
                     <strong>Event Time:</strong>
-                    <span>{customer.eventTime || "Not specified"}</span>
+                    <span>{formatEventTime(customer.eventTime)}</span>
                   </p>
 
                   <p>
@@ -1444,11 +1503,11 @@ function Checkout() {
                     <table className="invoice-table">
                       <thead>
                         <tr>
-                          <th style={{ width: "8%" }}>No.</th>
-                          <th style={{ width: "42%" }}>Dish</th>
+                          <th style={{ width: "9%" }}>No.</th>
+                          <th style={{ width: "51%" }}>Dish</th>
                           <th style={{ width: "25%" }}>Selection</th>
-                          <th style={{ width: "25%", textAlign: "center" }}>
-                            Quantity
+                          <th style={{ width: "15%", textAlign: "center" }}>
+                            Qty
                           </th>
                         </tr>
                       </thead>
@@ -1487,7 +1546,9 @@ function Checkout() {
 
                         {!category.items?.length && (
                           <tr>
-                            <td colSpan="4">No dishes in this category.</td>
+                            <td colSpan="4">
+                              No dishes in this category.
+                            </td>
                           </tr>
                         )}
                       </tbody>
@@ -1506,7 +1567,10 @@ function Checkout() {
                 <p className="footer-small">
                   WEDDING • EVENTS • CATERING
                 </p>
-                <div className="invoice-ornament" style={{ marginTop: 12 }}>
+                <div
+                  className="invoice-ornament"
+                  style={{ marginTop: 12 }}
+                >
                   ✦ ❧ ✦
                 </div>
               </div>
@@ -1525,7 +1589,40 @@ function Checkout() {
             <p style={{ color: "#e3d8c2", fontSize: 13 }}>
               Your complete menu and selected dishes are included in this document.
             </p>
+            <button
+              type="button"
+              className="print-btn"
+              onClick={saveOrderToHistory}
+              disabled={savingOrder || Boolean(savedOrderId)}
+              style={{
+                marginBottom: 12,
+                background: savedOrderId
+                  ? "#dcebdc"
+                  : "linear-gradient(135deg,#ead8ad,#c4a467)",
+                opacity: savingOrder ? 0.7 : 1,
+              }}
+            >
+              <Receipt size={19} />
+              {savingOrder
+                ? "Saving Order..."
+                : savedOrderId
+                  ? "Order Saved Successfully"
+                  : "Save Order to History"}
+            </button>
 
+            {savedOrderId && (
+              <p
+                style={{
+                  color: "#dcebdc",
+                  fontSize: 13,
+                  marginBottom: 12,
+                  textAlign: "center",
+                }}
+              >
+                Saved successfully
+                {savedBillNumber ? ` · Bill No: ${savedBillNumber}` : ""}
+              </p>
+            )}
             <button className="print-btn" onClick={printBill}>
               <Printer size={19} />
               Print Document
@@ -1533,7 +1630,7 @@ function Checkout() {
 
             <button
               className="print-btn"
-              onClick={() => downloadInvoice()}
+              onClick={downloadInvoice}
             >
               <Download size={19} />
               Download PDF
