@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
@@ -43,6 +44,7 @@ function Checkout() {
     address: "",
     advanceAmount: "",
     perPlatePrice: "",
+    totalAmount: "",
   });
 
   const [showPreview, setShowPreview] = useState(false);
@@ -55,7 +57,6 @@ function Checkout() {
     year: "numeric",
   });
 
-  // Convert HTML time input (24-hour) to 12-hour time with AM/PM.
   function formatEventTime(time) {
     if (!time) return "Not specified";
 
@@ -75,31 +76,33 @@ function Checkout() {
     return `${String(formattedHour).padStart(2, "0")}:${minutes} ${period}`;
   }
 
-  // If the full menu was not passed, use selected dishes as a fallback.
+  // Use the selected cart items as a fallback if the full menu is unavailable.
   const completeMenu = menu.length
     ? menu
     : [
-      {
-        id: "selected-menu",
-        name: "Selected Dishes",
-        items: items.map((item) => ({
-          ...item,
-          category_name: item.category_name || "Uncategorized",
-        })),
-      },
-    ];
+        {
+          id: "selected-menu",
+          name: "Selected Dishes",
+          items: items.map((item) => ({
+            ...item,
+            category_name: item.category_name || "Uncategorized",
+          })),
+        },
+      ];
 
   const selectedItems = new Map(
     items.map((item) => [String(item.id), item])
   );
 
-  const allMenuRows = completeMenu.flatMap((category) =>
-    (category.items || []).map((dish) => ({
-      ...dish,
-      category_name: category.name || "Uncategorized",
-      selectedItem: selectedItems.get(String(dish.id)) || null,
+  // Keep only selected dishes, grouped under their original categories.
+  const selectedMenu = completeMenu
+    .map((category) => ({
+      ...category,
+      items: (category.items || []).filter((dish) =>
+        selectedItems.has(String(dish.id))
+      ),
     }))
-  );
+    .filter((category) => category.items.length > 0);
 
   function updateCustomer(e) {
     setCustomer((previous) => ({
@@ -117,9 +120,9 @@ function Checkout() {
         .map((item) =>
           String(item.id) === String(id)
             ? {
-              ...item,
-              quantity: Number(item.quantity || 0) + amount,
-            }
+                ...item,
+                quantity: Number(item.quantity || 0) + amount,
+              }
             : item
         )
         .filter((item) => Number(item.quantity || 0) > 0)
@@ -161,6 +164,17 @@ function Checkout() {
       return;
     }
 
+    const totalAmount = Number(customer.totalAmount);
+
+    if (
+      !customer.totalAmount.trim() ||
+      !Number.isFinite(totalAmount) ||
+      totalAmount <= 0
+    ) {
+      alert("Please enter a valid Total Amount greater than zero.");
+      return;
+    }
+
     if (
       Number(customer.advanceAmount || 0) < 0 ||
       Number(customer.perPlatePrice || 0) < 0
@@ -194,7 +208,7 @@ function Checkout() {
       console.error("Invoice preparation error:", error);
       alert(
         "Unable to prepare the PDF: " +
-        (error?.message || "Please try again.")
+          (error?.message || "Please try again.")
       );
     }
   }
@@ -227,6 +241,7 @@ function Checkout() {
       const guests = Number(customer.guests);
       const perPlatePrice = Number(customer.perPlatePrice || 0);
       const advanceAmount = Number(customer.advanceAmount || 0);
+      const totalAmount = Number(customer.totalAmount);
 
       if (!Number.isInteger(guests) || guests < 1) {
         throw new Error("Please enter a valid number of guests.");
@@ -240,6 +255,10 @@ function Checkout() {
         throw new Error("Please enter a valid advance amount.");
       }
 
+      if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+        throw new Error("Please enter a valid total amount greater than zero.");
+      }
+
       const orderPayload = {
         customer_name: customer.name.trim(),
         phone: customer.phone.trim(),
@@ -249,7 +268,7 @@ function Checkout() {
         address: customer.address.trim(),
         per_plate_price: perPlatePrice,
         advance_amount: advanceAmount,
-        final_amount: guests * perPlatePrice,
+        final_amount: totalAmount,
       };
 
       const itemPayload = items.map((item) => ({
@@ -300,16 +319,17 @@ function Checkout() {
       setSavedBillNumber(savedOrder?.bill_number || "");
 
       alert(
-        `Order saved successfully!${savedOrder?.bill_number
-          ? ` Bill Number: ${savedOrder.bill_number}`
-          : ""
+        `Order saved successfully!${
+          savedOrder?.bill_number
+            ? ` Bill Number: ${savedOrder.bill_number}`
+            : ""
         }`
       );
     } catch (err) {
       console.error("Order saving error:", err);
       alert(
         "Unable to save order: " +
-        (err.message || "Please try again.")
+          (err.message || "Please try again.")
       );
     } finally {
       setSavingOrder(false);
@@ -441,7 +461,7 @@ function Checkout() {
     y += 9;
 
     // Customer and event information panel.
-    const detailsHeight = 57;
+    const detailsHeight = 65;
 
     pdf.setFillColor(248, 242, 230);
     pdf.roundedRect(
@@ -496,17 +516,37 @@ function Checkout() {
       y + 20
     );
     pdf.text(`Guests: ${customer.guests}`, rightX, y + 26);
+
+    let eventDetailY = y + 32;
+
+    if (Number(customer.perPlatePrice || 0) > 0) {
+      pdf.text(
+        `Per Plate: Rs. ${Number(customer.perPlatePrice).toFixed(2)}`,
+        rightX,
+        eventDetailY
+      );
+      eventDetailY += 6;
+    }
+
+    if (Number(customer.advanceAmount || 0) > 0) {
+      pdf.text(
+        `Advance: Rs. ${Number(customer.advanceAmount).toFixed(2)}`,
+        rightX,
+        eventDetailY
+      );
+      eventDetailY += 6;
+    }
+
+    pdf.setFont("helvetica", "bold");
     pdf.text(
-      `Per Plate: Rs. ${Number(customer.perPlatePrice || 0).toFixed(2)}`,
+      `Total Amount: Rs. ${Number(customer.totalAmount).toFixed(2)}`,
       rightX,
-      y + 32
+      eventDetailY
     );
-    pdf.text(
-      `Advance: Rs. ${Number(customer.advanceAmount || 0).toFixed(2)}`,
-      rightX,
-      y + 38
-    );
-    pdf.text(`Menu Items: ${allMenuRows.length}`, rightX, y + 44);
+    eventDetailY += 6;
+
+    pdf.setFont("helvetica", "normal");
+    pdf.text(`Selected Dishes: ${items.length}`, rightX, eventDetailY);
 
     y += detailsHeight + 9;
 
@@ -514,7 +554,7 @@ function Checkout() {
     pdf.setFontSize(11);
     pdf.setTextColor(...darkGold);
     pdf.text(
-      "COMPLETE CATERING MENU",
+      "SELECTED DISHES",
       pageWidth / 2,
       y,
       { align: "center" }
@@ -551,12 +591,11 @@ function Checkout() {
 
     let rowNumber = 0;
 
-    completeMenu.forEach((category) => {
+    selectedMenu.forEach((category) => {
       const categoryItems = category.items || [];
 
       ensureSpace(12);
 
-      // Category heading.
       pdf.setFillColor(248, 242, 230);
       pdf.rect(margin, y, contentWidth, 7, "F");
 
@@ -570,15 +609,6 @@ function Checkout() {
       );
 
       y += 7;
-
-      if (!categoryItems.length) {
-        ensureSpace(7);
-        pdf.setFont("helvetica", "italic");
-        pdf.setFontSize(7.5);
-        pdf.setTextColor(...muted);
-        pdf.text("No dishes in this category.", margin + 4, y + 5);
-        y += 8;
-      }
 
       categoryItems.forEach((dish) => {
         rowNumber += 1;
@@ -604,32 +634,17 @@ function Checkout() {
         pdf.text(String(rowNumber), columns.number, y + 5);
         pdf.text(dishLines, columns.dish, y + 5);
 
-        if (selected) {
-          pdf.setFont("helvetica", "bold");
-          pdf.setTextColor(35, 125, 75);
-          pdf.text("SELECTED", columns.status, y + 5);
+        pdf.setFont("helvetica", "bold");
+        pdf.setTextColor(35, 125, 75);
+        pdf.text("SELECTED", columns.status, y + 5);
 
-          pdf.setTextColor(...ink);
-          pdf.text(
-            String(selected.quantity || 0),
-            columns.quantity,
-            y + 5,
-            { align: "center" }
-          );
-        } else if (dish.is_available === false) {
-          pdf.setTextColor(160, 80, 65);
-          pdf.text("UNAVAILABLE", columns.status, y + 5);
-          pdf.setTextColor(...muted);
-          pdf.text("—", columns.quantity, y + 5, {
-            align: "center",
-          });
-        } else {
-          pdf.setTextColor(...muted);
-          pdf.text("NOT SELECTED", columns.status, y + 5);
-          pdf.text("—", columns.quantity, y + 5, {
-            align: "center",
-          });
-        }
+        pdf.setTextColor(...ink);
+        pdf.text(
+          String(selected?.quantity || 0),
+          columns.quantity,
+          y + 5,
+          { align: "center" }
+        );
 
         pdf.setDrawColor(230, 220, 201);
         pdf.line(
@@ -733,14 +748,31 @@ function Checkout() {
 
     if (sharing) return;
 
-    const caption =
-      `LAXMI NRUSINGHA CATTERS\n` +
-      `Catering Order Details for ${customer.name}\n` +
-      `Event Date: ${customer.eventDate}\n` +
-      `Event Time: ${formatEventTime(customer.eventTime)}\n` +
-      `Guests: ${customer.guests}\n` +
-      `Per Plate: Rs. ${Number(customer.perPlatePrice || 0).toFixed(2)}\n` +
-      `Advance: Rs. ${Number(customer.advanceAmount || 0).toFixed(2)}`;
+    const captionLines = [
+      "LAXMI NRUSINGHA CATTERS",
+      `Catering Order Details for ${customer.name}`,
+      `Event Date: ${customer.eventDate}`,
+      `Event Time: ${formatEventTime(customer.eventTime)}`,
+      `Guests: ${customer.guests}`,
+    ];
+
+    if (Number(customer.perPlatePrice || 0) > 0) {
+      captionLines.push(
+        `Per Plate: Rs. ${Number(customer.perPlatePrice).toFixed(2)}`
+      );
+    }
+
+    if (Number(customer.advanceAmount || 0) > 0) {
+      captionLines.push(
+        `Advance: Rs. ${Number(customer.advanceAmount).toFixed(2)}`
+      );
+    }
+
+    captionLines.push(
+      `Total Amount: Rs. ${Number(customer.totalAmount).toFixed(2)}`
+    );
+
+    const caption = captionLines.join("\n");
 
     try {
       if (
@@ -765,7 +797,7 @@ function Checkout() {
         "https://wa.me/?text=" +
         encodeURIComponent(
           caption +
-          "\n\nThe PDF has been downloaded. Please attach it before sending."
+            "\n\nThe PDF has been downloaded. Please attach it before sending."
         );
 
       window.open(whatsappUrl, "_blank", "noopener,noreferrer");
@@ -1369,6 +1401,20 @@ function Checkout() {
               />
             </label>
 
+            <label>
+              Total Amount (₹) *
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                name="totalAmount"
+                value={customer.totalAmount}
+                onChange={updateCustomer}
+                placeholder="Enter total amount"
+                required
+              />
+            </label>
+
             <label style={{ gridColumn: "1 / -1" }}>
               Event Address
               <textarea
@@ -1465,35 +1511,47 @@ function Checkout() {
                     <span>{customer.guests}</span>
                   </p>
 
-                  <p>
-                    <Utensils size={13} />
-                    <strong>Per Plate:</strong>
-                    <span>
-                      ₹{Number(customer.perPlatePrice || 0).toFixed(2)}
-                    </span>
-                  </p>
+                  {Number(customer.perPlatePrice || 0) > 0 && (
+                    <p>
+                      <Utensils size={13} />
+                      <strong>Per Plate:</strong>
+                      <span>
+                        ₹{Number(customer.perPlatePrice).toFixed(2)}
+                      </span>
+                    </p>
+                  )}
+
+                  {Number(customer.advanceAmount || 0) > 0 && (
+                    <p>
+                      <Wallet size={13} />
+                      <strong>Advance:</strong>
+                      <span>
+                        ₹{Number(customer.advanceAmount).toFixed(2)}
+                      </span>
+                    </p>
+                  )}
 
                   <p>
                     <Wallet size={13} />
-                    <strong>Advance:</strong>
+                    <strong>Total Amount:</strong>
                     <span>
-                      ₹{Number(customer.advanceAmount || 0).toFixed(2)}
+                      ₹{Number(customer.totalAmount || 0).toFixed(2)}
                     </span>
                   </p>
 
                   <p>
                     <Utensils size={13} />
                     <strong>Menu Items:</strong>
-                    <span>{allMenuRows.length} dishes</span>
+                    <span>{items.length} selected dishes</span>
                   </p>
                 </div>
               </div>
 
               <div className="invoice-menu-heading">
-                COMPLETE CATERING MENU
+                SELECTED DISHES
               </div>
 
-              {completeMenu.map((category) => (
+              {selectedMenu.map((category) => (
                 <div key={category.id || category.name}>
                   <div className="invoice-category-heading">
                     {category.name}
@@ -1523,19 +1581,9 @@ function Checkout() {
                                 <strong>{dish.name}</strong>
                               </td>
                               <td>
-                                {selected ? (
-                                  <span className="selected-label">
-                                    ✓ Selected
-                                  </span>
-                                ) : dish.is_available === false ? (
-                                  <span className="unavailable-label">
-                                    Unavailable
-                                  </span>
-                                ) : (
-                                  <span className="not-selected-label">
-                                    Not selected
-                                  </span>
-                                )}
+                                <span className="selected-label">
+                                  ✓ Selected
+                                </span>
                               </td>
                               <td style={{ textAlign: "center" }}>
                                 {selected ? selected.quantity : "—"}
@@ -1543,14 +1591,6 @@ function Checkout() {
                             </tr>
                           );
                         })}
-
-                        {!category.items?.length && (
-                          <tr>
-                            <td colSpan="4">
-                              No dishes in this category.
-                            </td>
-                          </tr>
-                        )}
                       </tbody>
                     </table>
                   </div>
@@ -1587,8 +1627,9 @@ function Checkout() {
             </h2>
 
             <p style={{ color: "#e3d8c2", fontSize: 13 }}>
-              Your complete menu and selected dishes are included in this document.
+              Only the dishes selected for this order are included in this document.
             </p>
+
             <button
               type="button"
               className="print-btn"
@@ -1623,6 +1664,7 @@ function Checkout() {
                 {savedBillNumber ? ` · Bill No: ${savedBillNumber}` : ""}
               </p>
             )}
+
             <button className="print-btn" onClick={printBill}>
               <Printer size={19} />
               Print Document

@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import {
   Routes,
@@ -6,6 +7,7 @@ import {
   useNavigate,
   useLocation,
 } from "react-router-dom";
+
 import {
   LayoutDashboard,
   LogOut,
@@ -16,6 +18,7 @@ import {
   ArrowRight,
   MessageCircle,
 } from "lucide-react";
+
 import { jsPDF } from "jspdf";
 
 import { supabase } from "./lib/supabase";
@@ -52,6 +55,7 @@ function OwnerMenu() {
           .from("categories")
           .select("*")
           .order("sort_order", { ascending: true }),
+
         supabase
           .from("menu_items")
           .select("*")
@@ -149,12 +153,6 @@ function OwnerMenu() {
     0
   );
 
-  const totalAmount = cart.reduce(
-    (sum, item) =>
-      sum + Number(item.price || 0) * Number(item.quantity || 0),
-    0
-  );
-
   // ------------------------------------------------
   // PREMIUM MENU PDF
   // ------------------------------------------------
@@ -205,8 +203,12 @@ function OwnerMenu() {
       pdf.setTextColor(...gold);
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(9);
-      pdf.text("✦", pageWidth / 2 - 37, y + 3, { align: "center" });
-      pdf.text("✦", pageWidth / 2 + 37, y + 3, { align: "center" });
+      pdf.text("✦", pageWidth / 2 - 37, y + 3, {
+        align: "center",
+      });
+      pdf.text("✦", pageWidth / 2 + 37, y + 3, {
+        align: "center",
+      });
 
       y += 10;
 
@@ -228,9 +230,12 @@ function OwnerMenu() {
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(8);
       pdf.setTextColor(...muted);
-      pdf.text("W E D D I N G   •   E V E N T S   •   C A T E R I N G", pageWidth / 2, y, {
-        align: "center",
-      });
+      pdf.text(
+        "W E D D I N G   •   E V E N T S   •   C A T E R I N G",
+        pageWidth / 2,
+        y,
+        { align: "center" }
+      );
 
       y += 7;
       pdf.setDrawColor(...gold);
@@ -292,11 +297,11 @@ function OwnerMenu() {
 
     menu.forEach((category) => {
       const dishes = category.items || [];
+
       if (!dishes.length) return;
 
       ensureSpace(18);
 
-      // Category title panel
       pdf.setFillColor(...paleGold);
       pdf.roundedRect(
         margin,
@@ -323,14 +328,21 @@ function OwnerMenu() {
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(10);
       pdf.setTextColor(...darkGold);
-      pdf.text(String(category.name || "Menu Category").toUpperCase(), margin + 4, y + 6.6);
+      pdf.text(
+        String(category.name || "Menu Category").toUpperCase(),
+        margin + 4,
+        y + 6.6
+      );
 
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(7);
       pdf.setTextColor(...muted);
-      pdf.text(`${dishes.length} ITEMS`, pageWidth - margin - 4, y + 6.5, {
-        align: "right",
-      });
+      pdf.text(
+        `${dishes.length} ITEMS`,
+        pageWidth - margin - 4,
+        y + 6.5,
+        { align: "right" }
+      );
 
       y += 14;
 
@@ -342,7 +354,6 @@ function OwnerMenu() {
 
         ensureSpace(rowHeight + 1);
 
-        // Alternating soft background
         if (index % 2 === 1) {
           pdf.setFillColor(252, 249, 241);
           pdf.roundedRect(
@@ -356,7 +367,6 @@ function OwnerMenu() {
           );
         }
 
-        // Small decorative bullet
         pdf.setFillColor(...gold);
         pdf.circle(margin + 5, y + 3, 0.75, "F");
 
@@ -369,12 +379,9 @@ function OwnerMenu() {
           pdf.setFont("helvetica", "italic");
           pdf.setFontSize(6.5);
           pdf.setTextColor(...unavailableColor);
-          pdf.text(
-            "Unavailable",
-            pageWidth - margin - 3,
-            y + 4,
-            { align: "right" }
-          );
+          pdf.text("Unavailable", pageWidth - margin - 3, y + 4, {
+            align: "right",
+          });
         }
 
         pdf.setDrawColor(235, 226, 209);
@@ -421,7 +428,6 @@ function OwnerMenu() {
       { align: "center" }
     );
 
-    // Page numbers on every page
     const totalPages = pdf.internal.getNumberOfPages();
 
     for (let page = 1; page <= totalPages; page += 1) {
@@ -479,10 +485,10 @@ function OwnerMenu() {
           text: caption,
           files: [file],
         });
+
         return;
       }
 
-      // On desktop, download the PDF first.
       pdf.save("Laxmi-Nrusingha-Premium-Catering-Menu.pdf");
 
       const whatsappUrl =
@@ -497,9 +503,7 @@ function OwnerMenu() {
       if (err?.name === "AbortError") return;
 
       console.error("Menu sharing error:", err);
-      alert(
-        "Unable to prepare the menu PDF. Please try again."
-      );
+      alert("Unable to prepare the menu PDF. Please try again.");
     } finally {
       setSharingMenu(false);
     }
@@ -522,13 +526,17 @@ function OwnerMenu() {
     navigate("/admin", { replace: true });
   }
 
+  // ------------------------------------------------
+  // DISH DISPLAY
+  // ------------------------------------------------
+
   function renderDish(dish, nested = false, categoryName = "") {
     const selectedItem = getCartItem(dish.id);
     const unavailable = dish.is_available === false;
 
     return (
       <div
-        className="menu-item"
+        className={`menu-item ${nested ? "group-dish-item" : ""}`}
         key={dish.id}
         style={{
           display: "flex",
@@ -580,16 +588,6 @@ function OwnerMenu() {
                   Currently Unavailable
                 </span>
               )}
-            </div>
-
-            <div
-              style={{
-                fontSize: "13px",
-                opacity: 0.75,
-                marginTop: "5px",
-              }}
-            >
-              ₹{Number(dish.price || 0).toFixed(2)}
             </div>
           </div>
         </div>
@@ -658,20 +656,31 @@ function OwnerMenu() {
     );
   }
 
+  // ------------------------------------------------
+  // GROUP DISHES BY DISH GROUP NAME
+  // ------------------------------------------------
+
   function renderCategoryItems(category) {
     const entries = [];
     const groups = new Map();
 
-    category.items.forEach((dish) => {
+    (category.items || []).forEach((dish) => {
       const groupName = dish.group_name?.trim();
 
+      // Dishes without a group name appear normally.
       if (!groupName) {
-        entries.push({ type: "dish", id: dish.id, dish });
+        entries.push({
+          type: "dish",
+          id: dish.id,
+          dish,
+        });
+
         return;
       }
 
       const normalizedName = groupName.toLowerCase();
 
+      // Create a group only once.
       if (!groups.has(normalizedName)) {
         const group = {
           type: "group",
@@ -684,6 +693,7 @@ function OwnerMenu() {
         entries.push(group);
       }
 
+      // Add each dish to its matching group.
       groups.get(normalizedName).items.push(dish);
     });
 
@@ -696,38 +706,45 @@ function OwnerMenu() {
 
       return (
         <div
+          className={`dish-group ${expanded ? "dish-group-expanded" : ""}`}
           key={entry.id}
-          style={{ borderBottom: "1px solid rgba(185,154,85,0.2)" }}
         >
           <button
             type="button"
+            className="dish-group-header"
             onClick={() => toggleGroup(entry.id)}
             aria-expanded={expanded}
-            style={{
-              width: "100%",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "16px 10px",
-              background: "transparent",
-              color: "inherit",
-              border: "none",
-              cursor: "pointer",
-              textAlign: "left",
-              fontSize: "16px",
-              fontWeight: "bold",
-            }}
           >
-            <span>
-              {entry.name} ({entry.items.length} recipes)
+            <span className="dish-group-title">
+              <span className="dish-group-icon">
+                {expanded ? <Minus size={18} /> : <Plus size={18} />}
+              </span>
+
+              <span>
+                <strong>{entry.name}</strong>
+                <small>
+                  {entry.items.length}{" "}
+                  {entry.items.length === 1 ? "item" : "items"}
+                </small>
+              </span>
             </span>
-            <span>{expanded ? "−" : "+"}</span>
+
+            <span className="dish-group-indicator">
+              {expanded ? "−" : "+"}
+            </span>
           </button>
 
-          {expanded &&
-            entry.items.map((dish) =>
-              renderDish(dish, true, category.name)
-            )}
+          <div
+            className={`dish-group-content ${
+              expanded ? "dish-group-content-open" : ""
+            }`}
+            aria-hidden={!expanded}
+          >
+            {expanded &&
+              entry.items.map((dish) =>
+                renderDish(dish, true, category.name)
+              )}
+          </div>
         </div>
       );
     });
@@ -737,59 +754,206 @@ function OwnerMenu() {
     <div className="app">
       <style>{`
         .premium-menu-actions {
-          display:flex;
-          justify-content:flex-end;
-          align-items:center;
-          gap:12px;
-          flex-wrap:wrap;
-          margin-bottom:30px;
+          display: flex;
+          justify-content: flex-end;
+          align-items: center;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-bottom: 30px;
         }
+
         .premium-action {
-          display:inline-flex;
-          align-items:center;
-          justify-content:center;
-          gap:9px;
-          padding:13px 19px;
-          border-radius:9px;
-          font-weight:800;
-          cursor:pointer;
-          transition:transform .2s ease, box-shadow .2s ease;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 9px;
+          padding: 13px 19px;
+          border-radius: 9px;
+          font-weight: 800;
+          cursor: pointer;
+          transition: transform .2s ease, box-shadow .2s ease;
         }
+
         .premium-action:hover {
-          transform:translateY(-2px);
-          box-shadow:0 7px 18px rgba(0,0,0,.12);
+          transform: translateY(-2px);
+          box-shadow: 0 7px 18px rgba(0,0,0,.12);
         }
+
         .premium-action:disabled {
-          opacity:.65;
-          cursor:wait;
-          transform:none;
+          opacity: .65;
+          cursor: wait;
+          transform: none;
         }
+
         .premium-share {
-          color:#fff;
-          border:1px solid #147b43;
-          background:linear-gradient(135deg,#1fa65a,#116b3c);
+          color: #fff;
+          border: 1px solid #147b43;
+          background: linear-gradient(135deg,#1fa65a,#116b3c);
         }
+
         .premium-dashboard {
-          color:#2c2111;
-          border:1px solid #b99a55;
-          background:linear-gradient(135deg,#ead7a9,#b99a55);
+          color: #2c2111;
+          border: 1px solid #b99a55;
+          background: linear-gradient(135deg,#ead7a9,#b99a55);
         }
+
         .premium-logout {
-          color:#b99a55;
-          border:1px solid #b99a55;
-          background:transparent;
+          color: #b99a55;
+          border: 1px solid #b99a55;
+          background: transparent;
         }
+
         .premium-menu-note {
-          color:#94794a;
-          font-size:12px;
-          text-align:right;
-          margin-top:-20px;
-          margin-bottom:24px;
+          color: #94794a;
+          font-size: 12px;
+          text-align: right;
+          margin-top: -20px;
+          margin-bottom: 24px;
         }
+
+        /* Expandable dish groups */
+
+        .dish-group {
+          margin: 10px 0;
+          border: 1px solid rgba(185,154,85,.35);
+          border-radius: 12px;
+          overflow: hidden;
+          background: rgba(185,154,85,.045);
+          transition: border-color .25s ease, box-shadow .25s ease;
+        }
+
+        .dish-group-expanded {
+          border-color: #b99a55;
+          box-shadow: 0 5px 16px rgba(80,55,15,.07);
+        }
+
+        .dish-group-header {
+          width: 100%;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          padding: 15px 16px;
+          background: transparent;
+          color: inherit;
+          border: none;
+          cursor: pointer;
+          text-align: left;
+          transition: background .2s ease;
+        }
+
+        .dish-group-header:hover {
+          background: rgba(185,154,85,.10);
+        }
+
+        .dish-group-title {
+          display: flex;
+          align-items: center;
+          gap: 13px;
+          min-width: 0;
+        }
+
+        .dish-group-title > span:last-child {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+        }
+
+        .dish-group-title strong {
+          font-size: 16px;
+          color: inherit;
+        }
+
+        .dish-group-title small {
+          font-size: 12px;
+          opacity: .65;
+        }
+
+        .dish-group-icon {
+          width: 36px;
+          height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          border-radius: 9px;
+          background: rgba(185,154,85,.17);
+          color: #9b783c;
+        }
+
+        .dish-group-indicator {
+          width: 28px;
+          height: 28px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          border-radius: 50%;
+          background: rgba(185,154,85,.15);
+          color: #9b783c;
+          font-size: 20px;
+          font-weight: 700;
+        }
+
+        .dish-group-content {
+          display: grid;
+          grid-template-rows: 0fr;
+          opacity: 0;
+          transition: opacity .25s ease;
+        }
+
+        .dish-group-content-open {
+          grid-template-rows: 1fr;
+          opacity: 1;
+          border-top: 1px solid rgba(185,154,85,.22);
+          animation: dishGroupSlide .28s ease;
+        }
+
+        .group-dish-item {
+          background: rgba(255,255,255,.30);
+          border-bottom: 1px solid rgba(185,154,85,.16);
+        }
+
+        .group-dish-item:last-child {
+          border-bottom: none;
+        }
+
+        @keyframes dishGroupSlide {
+          from {
+            opacity: 0;
+            transform: translateY(-8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
         @media(max-width:600px) {
-          .premium-menu-actions { justify-content:stretch; }
-          .premium-action { flex:1 1 100%; }
-          .premium-menu-note { text-align:center; margin-top:-15px; }
+          .premium-menu-actions {
+            justify-content: stretch;
+          }
+
+          .premium-action {
+            flex: 1 1 100%;
+          }
+
+          .premium-menu-note {
+            text-align: center;
+            margin-top: -15px;
+          }
+
+          .dish-group-header {
+            padding: 13px 12px;
+          }
+
+          .dish-group-title strong {
+            font-size: 15px;
+          }
+
+          .group-dish-item {
+            padding-left: 12px !important;
+          }
         }
       `}</style>
 
@@ -813,7 +977,9 @@ function OwnerMenu() {
             disabled={loading || sharingMenu}
           >
             <MessageCircle size={18} />
-            {sharingMenu ? "Preparing Menu PDF..." : "Share Premium Menu"}
+            {sharingMenu
+              ? "Preparing Menu PDF..."
+              : "Share Premium Menu"}
           </button>
 
           <button
@@ -869,6 +1035,7 @@ function OwnerMenu() {
             <section className="category" key={category.id}>
               <h3>
                 {category.name}
+
                 {!category.is_active && (
                   <small
                     style={{
@@ -912,8 +1079,8 @@ function OwnerMenu() {
         >
           <div>
             <strong>{totalItems} items selected</strong>
-            <div style={{ color: "#d8bd83", fontSize: "14px" }}>
-              Total: ₹{totalAmount.toFixed(2)}
+            <div style={{ color: "#d8bd83", fontSize: "13px" }}>
+              Your selected dishes are ready for checkout.
             </div>
           </div>
 

@@ -14,13 +14,15 @@ import {
   ImagePlus,
   X,
   RefreshCw,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import "./Admin.css";
 
 const emptyDish = {
   name: "",
   category_id: "",
-  price: "",
+  group_name: "",
   image_url: "",
   is_available: true,
 };
@@ -42,6 +44,8 @@ function AdminDashboard() {
   const [newCategory, setNewCategory] = useState("");
   const [editingCategoryId, setEditingCategoryId] = useState(null);
   const [editingCategoryName, setEditingCategoryName] = useState("");
+
+  const [showGroupHelp, setShowGroupHelp] = useState(false);
 
   async function loadDashboard() {
     setLoading(true);
@@ -92,7 +96,7 @@ function AdminDashboard() {
     setDishForm({
       name: dish.name || "",
       category_id: dish.category_id || "",
-      price: dish.price ?? "",
+      group_name: dish.group_name || "",
       image_url: dish.image_url || "",
       is_available: dish.is_available ?? true,
     });
@@ -116,11 +120,10 @@ function AdminDashboard() {
 
     const extension = file.name.split(".").pop().toLowerCase();
     const fileName = `${Date.now()}-${crypto.randomUUID()}.${extension}`;
-    const filePath = fileName;
 
     const { error: uploadError } = await supabase.storage
       .from("menu-images")
-      .upload(filePath, file, {
+      .upload(fileName, file, {
         cacheControl: "3600",
         upsert: false,
       });
@@ -129,7 +132,7 @@ function AdminDashboard() {
 
     const { data } = supabase.storage
       .from("menu-images")
-      .getPublicUrl(filePath);
+      .getPublicUrl(fileName);
 
     return data.publicUrl;
   }
@@ -149,23 +152,19 @@ function AdminDashboard() {
         throw new Error("Please select a category.");
       }
 
+      if (!dishForm.group_name.trim()) {
+        throw new Error("Enter a dish group, such as Chicken or Paneer.");
+      }
+
       const imageUrl = await uploadDishImage(selectedImage);
 
       const dishData = {
         name: dishForm.name.trim(),
         category_id: dishForm.category_id,
-        price:
-          dishForm.price === "" ? null : Number(dishForm.price),
+        group_name: dishForm.group_name.trim(),
         image_url: imageUrl,
         is_available: dishForm.is_available,
       };
-
-      if (
-        dishData.price !== null &&
-        (!Number.isFinite(dishData.price) || dishData.price < 0)
-      ) {
-        throw new Error("Enter a valid non-negative price.");
-      }
 
       let result;
 
@@ -182,7 +181,12 @@ function AdminDashboard() {
 
       if (result.error) throw result.error;
 
-      showNotice(editingId ? "Dish updated successfully!" : "Dish added successfully!");
+      showNotice(
+        editingId
+          ? "Dish updated successfully!"
+          : "Dish added successfully!"
+      );
+
       resetDishForm();
       await loadDashboard();
     } catch (err) {
@@ -238,7 +242,6 @@ function AdminDashboard() {
     setNotice("");
 
     const name = newCategory.trim();
-
     if (!name) return;
 
     const { error: insertError } = await supabase
@@ -332,6 +335,14 @@ function AdminDashboard() {
     (dish) => dish.is_available
   ).length;
 
+  const groupNames = [
+    ...new Set(
+      dishes
+        .map((dish) => dish.group_name?.trim())
+        .filter(Boolean)
+    ),
+  ];
+
   if (loading) {
     return (
       <div className="admin-loading">
@@ -345,7 +356,9 @@ function AdminDashboard() {
     <main className="admin-dashboard">
       <header className="admin-topbar">
         <div>
-          <span className="admin-topbar-label">LAXMI NRUSINGHA CATTERS</span>
+          <span className="admin-topbar-label">
+            LAXMI NRUSINGHA CATTERS
+          </span>
           <h1>Admin Dashboard</h1>
         </div>
 
@@ -361,7 +374,6 @@ function AdminDashboard() {
           <button
             type="button"
             onClick={() => navigate("/")}
-            aria-label="Return to menu"
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -382,7 +394,10 @@ function AdminDashboard() {
             Back to Menu
           </button>
 
-          <button className="admin-logout-btn" onClick={handleLogout}>
+          <button
+            className="admin-logout-btn"
+            onClick={handleLogout}
+          >
             <LogOut size={17} />
             Logout
           </button>
@@ -418,15 +433,23 @@ function AdminDashboard() {
       {notice && <div className="admin-success">{notice}</div>}
       {error && <div className="admin-error">{error}</div>}
 
+      {/* ADD OR EDIT DISH */}
+
       <section className="admin-panel">
         <div className="admin-panel-heading">
           <div>
-            <span className="admin-section-label">MENU MANAGEMENT</span>
+            <span className="admin-section-label">
+              MENU MANAGEMENT
+            </span>
             <h2>{editingId ? "Edit Dish" : "Add New Dish"}</h2>
           </div>
 
           {editingId && (
-            <button className="admin-cancel-btn" onClick={resetDishForm}>
+            <button
+              className="admin-cancel-btn"
+              type="button"
+              onClick={resetDishForm}
+            >
               <X size={16} /> Cancel
             </button>
           )}
@@ -440,9 +463,12 @@ function AdminDashboard() {
                 type="text"
                 value={dishForm.name}
                 onChange={(e) =>
-                  setDishForm({ ...dishForm, name: e.target.value })
+                  setDishForm({
+                    ...dishForm,
+                    name: e.target.value,
+                  })
                 }
-                placeholder="Example: Paneer Butter Masala"
+                placeholder="Example: Chicken 65"
                 required
               />
             </div>
@@ -463,7 +489,10 @@ function AdminDashboard() {
                 {categories
                   .filter((category) => category.is_active)
                   .map((category) => (
-                    <option key={category.id} value={category.id}>
+                    <option
+                      key={category.id}
+                      value={category.id}
+                    >
                       {category.name}
                     </option>
                   ))}
@@ -471,17 +500,30 @@ function AdminDashboard() {
             </div>
 
             <div>
-              <label>Price (₹)</label>
+              <label>Dish Group / Main Dish *</label>
               <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={dishForm.price}
+                type="text"
+                list="dish-group-options"
+                value={dishForm.group_name}
                 onChange={(e) =>
-                  setDishForm({ ...dishForm, price: e.target.value })
+                  setDishForm({
+                    ...dishForm,
+                    group_name: e.target.value,
+                  })
                 }
-                placeholder="Leave blank if price is on request"
+                placeholder="Example: Chicken"
+                required
               />
+
+              <datalist id="dish-group-options">
+                {groupNames.map((group) => (
+                  <option key={group} value={group} />
+                ))}
+              </datalist>
+
+              <small style={{ display: "block", marginTop: 6 }}>
+                Use the same group name for varieties of one dish.
+              </small>
             </div>
 
             <div>
@@ -493,11 +535,65 @@ function AdminDashboard() {
                   setSelectedImage(e.target.files?.[0] || null)
                 }
               />
+
               {dishForm.image_url && !selectedImage && (
                 <small>Existing photo will be retained.</small>
               )}
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setShowGroupHelp(!showGroupHelp)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              margin: "15px 0",
+              border: 0,
+              background: "transparent",
+              color: "inherit",
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            {showGroupHelp ? (
+              <ChevronDown size={17} />
+            ) : (
+              <ChevronRight size={17} />
+            )}
+            How to add dish varieties?
+          </button>
+
+          {showGroupHelp && (
+            <div
+              style={{
+                padding: 15,
+                borderRadius: 10,
+                background: "rgba(177,138,67,0.10)",
+                marginBottom: 15,
+                lineHeight: 1.8,
+              }}
+            >
+              <strong>Example:</strong>
+              <p>
+                First dish: Chicken 65 — Group: Chicken
+              </p>
+              <p>
+                Second dish: Kadai Chicken — Group: Chicken
+              </p>
+              <p>
+                Third dish: Butter Chicken — Group: Chicken
+              </p>
+              <p>
+                Fourth dish: Shahi Paneer — Group: Paneer
+              </p>
+              <p>
+                The customer menu will use these group names to
+                organize varieties into expandable sections.
+              </p>
+            </div>
+          )}
 
           <label className="admin-availability-check">
             <input
@@ -513,7 +609,11 @@ function AdminDashboard() {
             Dish available to customers
           </label>
 
-          <button className="admin-primary-btn" type="submit" disabled={saving}>
+          <button
+            className="admin-primary-btn"
+            type="submit"
+            disabled={saving}
+          >
             <Plus size={18} />
             {saving
               ? "Saving..."
@@ -524,6 +624,8 @@ function AdminDashboard() {
         </form>
       </section>
 
+      {/* MANAGE DISHES */}
+
       <section className="admin-panel">
         <div className="admin-panel-heading">
           <div>
@@ -531,7 +633,10 @@ function AdminDashboard() {
             <h2>Manage Dishes</h2>
           </div>
 
-          <button className="admin-refresh-btn" onClick={loadDashboard}>
+          <button
+            className="admin-refresh-btn"
+            onClick={loadDashboard}
+          >
             <RefreshCw size={16} /> Refresh
           </button>
         </div>
@@ -547,7 +652,7 @@ function AdminDashboard() {
                 <tr>
                   <th>Dish</th>
                   <th>Category</th>
-                  <th>Price</th>
+                  <th>Dish Group</th>
                   <th>Available</th>
                   <th>Actions</th>
                 </tr>
@@ -564,30 +669,32 @@ function AdminDashboard() {
                       <td>
                         <div className="admin-dish-cell">
                           {dish.image_url ? (
-                            <img src={dish.image_url} alt={dish.name} />
+                            <img
+                              src={dish.image_url}
+                              alt={dish.name}
+                            />
                           ) : (
                             <div className="admin-no-image">
                               <ImagePlus size={18} />
                             </div>
                           )}
+
                           <strong>{dish.name}</strong>
                         </div>
                       </td>
 
                       <td>{category?.name || "Unknown"}</td>
 
-                      <td>
-                        {dish.price == null
-                          ? "On request"
-                          : `₹${Number(dish.price).toFixed(2)}`}
-                      </td>
+                      <td>{dish.group_name || "Not assigned"}</td>
 
                       <td>
                         <label className="admin-switch">
                           <input
                             type="checkbox"
                             checked={Boolean(dish.is_available)}
-                            onChange={() => toggleAvailability(dish)}
+                            onChange={() =>
+                              toggleAvailability(dish)
+                            }
                           />
                           <span className="admin-switch-slider" />
                         </label>
@@ -620,15 +727,22 @@ function AdminDashboard() {
         )}
       </section>
 
+      {/* MANAGE CATEGORIES */}
+
       <section className="admin-panel">
         <div className="admin-panel-heading">
           <div>
-            <span className="admin-section-label">ORGANIZE YOUR MENU</span>
+            <span className="admin-section-label">
+              ORGANIZE YOUR MENU
+            </span>
             <h2>Manage Categories</h2>
           </div>
         </div>
 
-        <form className="admin-category-form" onSubmit={addCategory}>
+        <form
+          className="admin-category-form"
+          onSubmit={addCategory}
+        >
           <input
             type="text"
             value={newCategory}
@@ -644,27 +758,45 @@ function AdminDashboard() {
 
         <div className="admin-category-list">
           {categories.map((category) => (
-            <div className="admin-category-row" key={category.id}>
+            <div
+              className="admin-category-row"
+              key={category.id}
+            >
               {editingCategoryId === category.id ? (
                 <input
                   value={editingCategoryName}
-                  onChange={(e) => setEditingCategoryName(e.target.value)}
+                  onChange={(e) =>
+                    setEditingCategoryName(e.target.value)
+                  }
                 />
               ) : (
                 <strong>{category.name}</strong>
               )}
 
-              <span className={category.is_active ? "status-active" : "status-inactive"}>
+              <span
+                className={
+                  category.is_active
+                    ? "status-active"
+                    : "status-inactive"
+                }
+              >
                 {category.is_active ? "Active" : "Hidden"}
               </span>
 
               <div className="admin-actions">
                 {editingCategoryId === category.id ? (
                   <>
-                    <button onClick={() => renameCategory(category.id)}>
+                    <button
+                      type="button"
+                      onClick={() => renameCategory(category.id)}
+                    >
                       Save
                     </button>
-                    <button onClick={() => setEditingCategoryId(null)}>
+
+                    <button
+                      type="button"
+                      onClick={() => setEditingCategoryId(null)}
+                    >
                       Cancel
                     </button>
                   </>
@@ -707,7 +839,9 @@ function AdminDashboard() {
           )}
         </div>
       </section>
+
       <OrderHistory />
+
       <footer className="admin-footer">
         Laxmi Nrusingha Catters · Menu Administration
       </footer>
